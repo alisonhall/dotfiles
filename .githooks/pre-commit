@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+#
+# This repo is public. Blocks commits that contain secrets or personal info.
+#
+# Bypass a single check:  SKIP_GITLEAKS=1 git commit ...
+
+status=0
+
+# 1. Secrets (API keys, tokens, passwords) - https://github.com/gitleaks/gitleaks
+# install.sh may have put it in ~/.local/bin, which GUI git clients don't have on PATH
+PATH="$PATH:$HOME/.local/bin"
+if [ -n "${SKIP_GITLEAKS:-}" ]; then
+	:
+elif ! command -v gitleaks >/dev/null 2>&1; then
+	echo "pre-commit: gitleaks isn't installed, so staged changes can't be scanned for secrets." >&2
+	echo "  Run install.sh to install it, or commit with SKIP_GITLEAKS=1" >&2
+	status=1
+elif gitleaks git --help >/dev/null 2>&1; then
+	gitleaks git --staged --redact --no-banner || status=1
+else
+	# gitleaks before v8.19 (e.g. older Linux distro packages)
+	gitleaks protect --staged --redact --no-banner || status=1
+fi
+
+# 2. Personal strings listed in ~/.dotfiles_blocklist (kept outside the repo)
+blocklist="$HOME/.dotfiles_blocklist"
+if [ -f "$blocklist" ]; then
+	patterns=()
+	while IFS= read -r line || [ -n "$line" ]; do
+		line="${line%$'\r'}"
+		case "$line" in ''|'#'*) continue ;; esac
+		patterns+=(-e "$line")
+	done < "$blocklist"
+
+	if [ ${#patterns[@]} -gt 0 ]; then
+		matches="$(git grep --cached -I -n -i -F "${patterns[@]}")"
+		if [ -n "$matches" ]; then
+			echo "pre-commit: found strings from ~/.dotfiles_blocklist in staged files:" >&2
+			echo "$matches" >&2
+			echo "  Move these into ~/.shell_local or ~/.gitconfig instead." >&2
+			status=1
+		fi
+	fi
+fi
+
+exit $status

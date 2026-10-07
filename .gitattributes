@@ -1,0 +1,2 @@
+# Always check out with LF line endings - CRLF breaks shell scripts, even on Windows
+* text=auto eol=lf

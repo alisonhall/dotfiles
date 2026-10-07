@@ -1,0 +1,10 @@
+# macOS
+.DS_Store
+Icon?
+
+# Windows
+desktop.ini
+Thumbs.db
+
+# Editors
+*~
