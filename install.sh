@@ -136,6 +136,24 @@ setup_git() {
 }
 
 #   -------------------------------
+#   ITERM (macOS)
+#   -------------------------------
+
+# Tells iTerm to load its settings from config/iterm. Changes made in iTerm's
+# settings are then saved there too, so they can be committed.
+setup_iterm() {
+	[ "$(uname -s)" = Darwin ] && [ -d "/Applications/iTerm.app" ] || return 0
+	echo "iTerm:"
+	if [ "$(defaults read com.googlecode.iterm2 LoadPrefsFromCustomFolder 2>/dev/null)" = 1 ]; then
+		echo "  iTerm already loads settings from $(defaults read com.googlecode.iterm2 PrefsCustomFolder)"
+		return
+	fi
+	defaults write com.googlecode.iterm2 PrefsCustomFolder -string "$DOTFILES/config/iterm"
+	defaults write com.googlecode.iterm2 LoadPrefsFromCustomFolder -bool true
+	echo "  iTerm will load settings from config/iterm (restart iTerm to apply)"
+}
+
+#   -------------------------------
 #   THIS REPO
 #   -------------------------------
 
@@ -223,6 +241,7 @@ EOF
 
 setup_shell
 setup_git
+setup_iterm
 setup_repo_hooks
 echo
 echo "Done. Open a new terminal to load the changes."

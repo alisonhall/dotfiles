@@ -16,6 +16,8 @@ The installer doesn't replace your existing config files. It:
 - adds a small block to `~/.bashrc`, `~/.bash_profile` and `~/.zshrc` that loads `shell/` from this repo
 - adds an include for `git/gitconfig` to the top of `~/.gitconfig` and backs up the original first
 - creates `~/.shell_local` from [local.example.sh](local.example.sh)
+- on macOS, points iTerm at `config/iterm` for its settings
+- installs gitleaks if it's missing (see [Committing](#committing))
 
 ## What goes where
 
@@ -24,6 +26,7 @@ The installer doesn't replace your existing config files. It:
 | Shell | `shell/` (see below) | `~/.shell_local` |
 | Git | `git/gitconfig`, `git/gitignore_global` | `~/.gitconfig` (below the include) |
 | Prompt (zsh) | `config/p10k.zsh` | `~/.p10k.zsh`, if present, is used instead |
+| iTerm (macOS) | `config/iterm/` | |
 | Scripts | `bin/` (added to `PATH`) | |
 
 Put anything personal, work-specific or specific to one computer in the local files, such as emails, server addresses or tool paths. They load after the shared files, so they override them.
@@ -40,6 +43,24 @@ Put anything personal, work-specific or specific to one computer in the local fi
 Run `showa <text>` to find where an alias or function is defined.
 
 Tools that edit your shell config themselves (conda, nvm and similar) write to `~/.zshrc` / `~/.bashrc` and not to this repo, which is what you want.
+
+## Scripts
+
+Everything in `bin/` is on your `PATH`.
+
+| Script | What it does |
+|---|---|
+| `colours_and_formatting.sh` | Reference for terminal colour and formatting codes (`-a` for everything) |
+| `timestamps.sh` | Common `date` formats, with their output right now |
+| `format-git-objects.sh` | Source it to get `$allFormatOptions`, a list of every `git for-each-ref --format` field |
+| `git-branch-status` | How far each branch is ahead of or behind its upstream ([upstream project](https://github.com/bill-auger/git-branch-status), GPLv3) |
+| `remove-merged-branches` | Delete local branches merged into the current one, after you review the list |
+| `screenshots-of-urls` | Screenshot a page at several widths with Firefox: `screenshots-of-urls <url> [folder] [widths...]` |
+| `createpdf.sh`, `createallpdfs.sh` | Make a PDF from the images in a folder (or each subfolder). Needs ImageMagick and exiftool |
+| `combinepdfs.sh` | Combine the PDFs in a folder into one. Needs Ghostscript and exiftool |
+| `cleanjpgfilenames.sh` | Remove anything after `.jpg` in file names (e.g. `photo.jpg?w=800`) |
+| `getimagesfromlist.sh` | Download every image URL listed in a published Google Sheet (`IMAGE_LIST_CSV_URL` in `~/.shell_local`) |
+| `my-debug-env` | Bash debugging helpers: `TRACE=1 BASH_ENV=my-debug-env ./some-script` |
 
 ## Committing
 

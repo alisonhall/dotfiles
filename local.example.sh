@@ -21,6 +21,7 @@
 # export CURRENT_REMOTE_NAME=origin       # Remote used by the git shortcuts
 # export CURRENT_DEV_BRANCH=main          # Branch dev/sprint/gmerge-dev use (default: the remote's default branch)
 # DOTFILES_WELCOME=false                  # Turn off the welcome message
+# export IMAGE_LIST_CSV_URL="https://docs.google.com/spreadsheets/d/e/.../pub?output=csv"   # For getimagesfromlist.sh
 
 #   -------------------------------
 #   This machine only

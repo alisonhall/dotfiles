@@ -1,0 +1,50 @@
+#!/bin/bash
+# Delete local branches that have been merged into the current branch.
+# Lists them in merged-branches.txt first so you can review/edit the list.
+# chmod +x remove-merged-branches
+
+remote="${CURRENT_REMOTE_NAME:-origin}"
+current="$(git branch --show-current)"
+
+# Merged branches, minus the current branch and main/master
+git branch --merged --format='%(refname:short)' | grep -vxE "main|master|$current" > merged-branches.txt
+
+cat merged-branches.txt
+while true; do
+  read -p "Have you reviewed and edited merged-branches.txt? Are you ready to delete those branches listed?  " yn
+  case "$yn" in
+      [Yy]* ) break;;
+      [Nn]* ) exit;;
+      * ) echo "Please answer yes or no.";;
+  esac
+done
+
+while IFS= read -r branch
+do
+    [ -n "$branch" ] && git branch -d "$branch"
+done < "merged-branches.txt"
+
+rm merged-branches.txt
+
+git remote prune "$remote"
+
+### Merged branches, showing last commit date and author
+# for branch in `git branch -r --merged | grep -v HEAD`; do echo -e `git show --format="%ci %cr %an" $branch | head -n 1` \\t$branch; done | sort -r
+
+### Unmerged branches, showing last commit date and author
+# for branch in `git branch -r --no-merged | grep -v HEAD`; do echo -e `git show --format="%ci %cr %an" $branch | head -n 1` \\t$branch; done | sort -r
+
+### Delete remote branch
+# git push origin --delete branch-name
+
+### Show only local merged branches, which have appropriate remote merged branches
+# comm -12 <(git branch --merged|awk '{print($1)}') <(git branch -r --merged|awk '{print($1)}'|awk -F \/ '{print($2)}')
+
+### Show only local merged branches, which have appropriate remote merged branches, with date and author information
+# for branch in `comm -12 <(git branch --merged|awk '{print($1)}') <(git branch -r --merged|awk '{print($1)}'|awk -F \/ '{print($2)}')`;do echo -e `git show --format="%ci %cr %an" $branch | head -n 1` \\t$branch; done | sort -r
+
+### Show only local non-merged branches, which have appropriate remote non-merged branches
+# comm -12 <(git branch --no-merged|awk '{print($1)}') <(git branch -r --no-merged|awk '{print($1)}'|awk -F \/ '{print($2)}')
+
+### Show only local non-merged branches, which have appropriate remote non-merged branches, with date and author information
+# for branch in `comm -12 <(git branch --no-merged|awk '{print($1)}') <(git branch -r --no-merged|awk '{print($1)}'|awk -F \/ '{print($2)}')`; do echo -e `git show --format="%ci %cr %an" $branch | head -n 1` \\t$branch; done | sort -r

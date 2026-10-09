@@ -80,6 +80,7 @@ zipf () { zip -r "$1".zip "$1" ; }          # zipf:         To create a ZIP arch
 alias numFiles='echo $(ls -1 | wc -l)'      # numFiles:     Count of non-hidden files in current dir
 alias cleanupDS="find . -type f -name '*.DS_Store' -ls -delete"    # cleanupDS:    Recursively delete .DS_Store files
 alias make-script-executable='chmod +x'
+alias show-terminal-colours='colours_and_formatting.sh'     # show-terminal-colours: Reference for terminal colour codes (-a for all)
 
 #   extract:  Extract most known archives with one command
 #   ---------------------------------------------------------

@@ -1,0 +1,43 @@
+#!/bin/bash
+# Take screenshots of a web page at several window widths, using Firefox.
+#
+# Usage: screenshots-of-urls <url> [output-folder] [widths...]
+#   e.g. screenshots-of-urls http://localhost:3000 ~/Desktop/screenshots 320 768 1400
+#
+# Default widths: 320 991 992 1400 (either side of the usual breakpoints)
+# https://www.booleanworld.com/take-screenshots-webpages-command-line/
+# chmod +x screenshots-of-urls
+
+url="$1"
+outputFolder="${2:-.}"
+if [ $# -gt 2 ]; then
+  widths=("${@:3}")
+else
+  widths=(320 991 992 1400)
+fi
+
+if [ -z "$url" ]; then
+  echo "Usage: screenshots-of-urls <url> [output-folder] [widths...]"
+  exit 1
+fi
+
+case "$(uname -s)" in
+  Darwin*) FIREFOX="/Applications/Firefox.app/Contents/MacOS/firefox" ;;
+  MINGW* | MSYS* | CYGWIN*) FIREFOX="/c/Program Files/Mozilla Firefox/firefox.exe" ;;
+  *) FIREFOX="firefox" ;;
+esac
+
+mkdir -p "$outputFolder"
+
+# File name from the URL, e.g. http://localhost:3000/en/page -> localhost!3000!en!page
+baseName="$(echo "$url" | sed -e 's|^[a-z]*://||' -e 's|/$||' -e 's|[/:?&=]|!|g')"
+
+for width in "${widths[@]}"; do
+  file="$outputFolder/$baseName-$width.png"
+  "$FIREFOX" --headless --screenshot "$file" "$url" --window-size="$width"
+  echo "Saved $file"
+done
+
+# For visual regression testing across many pages, see BackstopJS:
+#   npm install -g backstopjs
+#   backstop init
