@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # This repo is public. Blocks commits that contain secrets or personal info,
-# or shell files with syntax errors.
+# shell files with syntax errors, or paths that only work on one machine.
 #
 # Bypass a single check:  SKIP_GITLEAKS=1 git commit ...
 
@@ -50,8 +50,15 @@ if [ "${#patterns[@]}" -eq 0 ]; then
 fi
 
 # 3. Shell syntax, so a broken file never reaches other machines
-if ! "$(git rev-parse --show-toplevel)/tools/check-syntax.sh" >&2; then
+repo_root="$(git rev-parse --show-toplevel)"
+if ! bash "$repo_root/tools/check-syntax.sh" >&2; then
 	echo "pre-commit: fix the errors above before committing." >&2
+	status=1
+fi
+
+# 4. Hard-coded paths, so the repo keeps working wherever it's cloned
+if ! bash "$repo_root/tools/check-paths.sh" >&2; then
+	echo "pre-commit: replace the hard-coded paths above before committing." >&2
 	status=1
 fi
 

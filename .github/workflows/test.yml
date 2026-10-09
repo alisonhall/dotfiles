@@ -21,6 +21,9 @@ jobs:
       - name: Syntax check (bash and zsh)
         run: bash tools/check-syntax.sh
 
+      - name: No hard-coded paths
+        run: bash tools/check-paths.sh
+
       - name: shellcheck (errors only)
         # git-branch-status is a third-party script, kept as its authors wrote it
         run: |

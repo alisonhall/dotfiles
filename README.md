@@ -90,3 +90,4 @@ Everything in `bin/` is on your `PATH`.
 - secrets, found by [gitleaks](https://github.com/gitleaks/gitleaks), which you need to install
 - any string listed in `~/.dotfiles_blocklist`, a local list of your own emails, hostnames and similar
 - shell syntax errors or Windows line endings, checked by `tools/check-syntax.sh`
+- paths that only work on one machine, checked by `tools/check-paths.sh`: this repo's own location, absolute paths to its files (use `"$DOTFILES/bin/..."` instead), or a home folder with a user name in it (use `$HOME` or `~`). To allow a line on purpose, add a comment containing `path-check: ignore`
