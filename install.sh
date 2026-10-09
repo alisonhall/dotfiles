@@ -432,12 +432,18 @@ check_gitconfig() {
 		problem "$gitconfig doesn't exist - run ./install.sh"
 		return
 	fi
-	overlap="$(comm -12 \
-		<(git config --file "$gitconfig" --name-only --list | sort -u) \
-		<(git config --file "$DOTFILES/git/gitconfig" --name-only --list | sort -u))"
+	# Settings both files have, minus the ones with identical values (harmless - e.g. `git lfs install` adds
+	# the same [filter "lfs"] settings the shared config has)
+	overlap="$(comm -23 \
+		<(comm -12 \
+			<(git config --file "$gitconfig" --name-only --list | sort -u) \
+			<(git config --file "$DOTFILES/git/gitconfig" --name-only --list | sort -u)) \
+		<(comm -12 \
+			<(git config --file "$gitconfig" --list | sort -u) \
+			<(git config --file "$DOTFILES/git/gitconfig" --list | sort -u) | cut -d= -f1 | sort -u))"
 	if [ -n "$overlap" ]; then
 		count="$(printf '%s\n' "$overlap" | wc -l | tr -d ' ')"
-		warning "$gitconfig sets $count things the shared git config also sets, so the shared versions are ignored:"
+		warning "$gitconfig overrides $count setting(s) from the shared git config with different values:"
 		detail "$(printf '%s\n' "$overlap" | head -5 | paste -sd ' ' -)$([ "$count" -gt 5 ] && echo " ...")"
 		detail "If $gitconfig is a copy of an old config, keep only [user] and machine-specific settings below the include."
 	else
