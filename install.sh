@@ -26,6 +26,7 @@ MARKER_END="# <<< dotfiles <<<"
 TIMESTAMP="$(date +%Y%m%d%H%M%S)"
 
 MODE=install
+IS_GIT_CLONE=1
 case "${1:-}" in
 	"") ;;
 	--check) MODE=check ;;
@@ -82,6 +83,14 @@ without_dotfiles_block() {
 		!skip' "$1"
 }
 
+# Prints what's between the dotfiles block markers in a file
+block_contents() {
+	awk -v start="$MARKER_START" -v end="$MARKER_END" '
+		$0 == start { inside = 1; next }
+		$0 == end { inside = 0 }
+		inside' "$1"
+}
+
 # ensure_block <file> <contents>: Make sure <file> has a dotfiles block with exactly <contents>.
 # Creates the file if needed, appends the block if it's missing, and replaces the block's
 # contents if they're out of date (e.g. the repo has moved). Everything else in the file is kept.
@@ -101,21 +110,23 @@ ensure_block() {
 		return
 	fi
 
-	current="$(awk -v start="$MARKER_START" -v end="$MARKER_END" '
-		$0 == start { inside = 1; next }
-		$0 == end { inside = 0 }
-		inside' "$file")"
+	current="$(block_contents "$file")"
 	if [ "$current" = "$contents" ]; then
 		echo "  $file is already set up"
 		return
 	fi
 
+	local old_location
+	old_location="$(printf '%s\n' "$current" | sed -n 's/^export DOTFILES="\(.*\)"$/\1/p')"
 	cp "$file" "$file.bak.$TIMESTAMP"
 	DOTFILES_BLOCK="$contents" awk -v start="$MARKER_START" -v end="$MARKER_END" '
 		$0 == start { print; print ENVIRON["DOTFILES_BLOCK"]; skip = 1; next }
 		$0 == end { skip = 0 }
 		!skip' "$file.bak.$TIMESTAMP" > "$file"
 	echo "  Updated the dotfiles block in $file (it was out of date; old version in $file.bak.$TIMESTAMP)"
+	if [ -n "$old_location" ] && [ "$old_location" != "$DOTFILES" ]; then
+		detail "It loaded the dotfiles from $old_location - now $DOTFILES"
+	fi
 }
 
 #   -------------------------------
@@ -141,8 +152,70 @@ preflight() {
 		echo "$output"
 	fi
 
+	check_locations
+
 	if [ "$PROBLEMS" -eq "$problems_before" ]; then
 		ok "running as $(id -un) with bash $BASH_VERSION and git $(git --version | awk '{ print $3 }'); the repo's files pass syntax checks"
+	fi
+}
+
+# Shows a path, plus its Windows form on Windows (e.g. /c/Users/me -> C:\Users\me)
+show_path() {
+	if command -v cygpath >/dev/null 2>&1; then
+		echo "$1 ($(cygpath -w "$1"))"
+	else
+		echo "$1"
+	fi
+}
+
+# Where the repo is and which home folder is being set up. The repo can be anywhere and
+# called anything, but it has to stay put: every new shell loads it from this path.
+check_locations() {
+	echo "  Repo: $(show_path "$DOTFILES")"
+	echo "  Home: $(show_path "$HOME")"
+
+	# The path is written into the shell startup files inside double quotes
+	case "$DOTFILES" in
+		*[\"\$\`\\]*)
+			problem "the repo's path contains \", \$, \` or \\, which would break the shell setup. Move it somewhere else."
+			;;
+	esac
+
+	local lower_path
+	lower_path="$(printf '%s' "$DOTFILES" | tr '[:upper:]' '[:lower:]')"
+	case "$lower_path" in
+		*/downloads/* | */temp/* | */tmp/* | /var/folders/*)
+			warning "the repo is in a downloads or temporary folder. Every new shell loads it from here, so"
+			detail "move it somewhere permanent first (e.g. $(show_path "$HOME/dotfiles")) and run install.sh from there."
+			;;
+		*onedrive* | *dropbox* | *google\ drive* | *icloud*)
+			warning "the repo is in a cloud-synced folder. Sync can keep files offline until they're opened,"
+			detail "or create conflicted copies inside .git. A plain folder (e.g. $(show_path "$HOME/dotfiles")) is safer."
+			;;
+	esac
+
+	# (Compared after cd + pwd, because git prints C:/... paths on Windows)
+	local toplevel
+	toplevel="$(git -C "$DOTFILES" rev-parse --show-toplevel 2>/dev/null || true)"
+	if [ -n "$toplevel" ] && [ "$(cd "$toplevel" && pwd)" = "$DOTFILES" ]; then
+		IS_GIT_CLONE=1
+	else
+		IS_GIT_CLONE=0
+		warning "this copy isn't a git clone (was it downloaded as a ZIP?). It will work, but update-dotfiles"
+		detail "can't pull updates and commits can't be checked. To fix: git clone the repo and run its install.sh."
+	fi
+
+	# On Windows, programs started outside Git Bash (VS Code, GitHub Desktop...) find ~/.gitconfig
+	# in the home folder Windows has set, which may not be the one Git Bash is using
+	if command -v reg >/dev/null 2>&1 && command -v cygpath >/dev/null 2>&1; then
+		local windows_home
+		# (reg fails when HOME isn't set, which is normal)
+		windows_home="$({ reg query 'HKCU\Environment' //v HOME 2>/dev/null || true; } | tr -d '\r' |
+			sed -n 's/^ *HOME *REG_[A-Z_]*SZ *//p')"
+		if [ -n "$windows_home" ] && [ "$(cygpath -u "$windows_home")" != "$HOME" ]; then
+			warning "Windows' HOME setting ($windows_home) isn't the home folder Git Bash is using ($(cygpath -w "$HOME"))."
+			detail "Programs started outside Git Bash won't see this setup. Make them match, or remove the Windows setting."
+		fi
 	fi
 }
 
@@ -150,8 +223,15 @@ preflight() {
 #   SHELL
 #   -------------------------------
 
+# If the repo has moved or been deleted, new shells say so instead of showing a cryptic error
 shell_block() {
-	printf 'export DOTFILES="%s"\nsource "$DOTFILES/%s"' "$DOTFILES" "$1"
+	printf '%s\n' \
+		"export DOTFILES=\"$DOTFILES\"" \
+		"if [ -f \"\$DOTFILES/$1\" ]; then" \
+		"	source \"\$DOTFILES/$1\"" \
+		"else" \
+		"	echo \"dotfiles: can't find \$DOTFILES - if the repo moved, run install.sh from its new location\" >&2" \
+		"fi"
 }
 
 # macOS Terminal and Git Bash open login shells, which read ~/.bash_profile but not ~/.bashrc.
@@ -186,6 +266,13 @@ setup_shell() {
 #   GIT
 #   -------------------------------
 
+# is_dotfiles_copy <path to a file inside a repo's git/ folder>: whether that repo is a copy of this one
+is_dotfiles_copy() {
+	local repo
+	repo="$(dirname "$(dirname "$1")")"
+	[ -f "$repo/install.sh" ] && [ -f "$repo/shell/common.sh" ] && [ -f "$repo/git/gitignore_global" ]
+}
+
 git_unset_include() {
 	if git_version_at_least 2 30; then
 		git config --global --fixed-value --unset include.path "$1"
@@ -204,8 +291,9 @@ setup_git() {
 	include_path="$(native_path "$DOTFILES/git/gitconfig")"
 	move_aside_if_symlink "$gitconfig"
 
-	# Remove includes of a dotfiles gitconfig that no longer exists (e.g. the repo moved).
-	# Git silently ignores missing include files, so these would otherwise go unnoticed.
+	# Remove includes of a dotfiles gitconfig that no longer exists (e.g. the repo moved; git
+	# silently ignores missing include files), or that belongs to another copy of this repo
+	# (otherwise both copies' settings would load)
 	local old_path
 	while IFS= read -r old_path; do
 		case "$old_path" in
@@ -214,6 +302,9 @@ setup_git() {
 				if [ ! -f "$old_path" ]; then
 					git_unset_include "$old_path"
 					echo "  Removed include of $old_path (file no longer exists)"
+				elif is_dotfiles_copy "$old_path"; then
+					git_unset_include "$old_path"
+					echo "  Removed include of $old_path (another copy of this repo)"
 				fi
 				;;
 		esac
@@ -236,11 +327,19 @@ setup_git() {
 	fi
 
 	# Point core.excludesfile at the repo's gitignore_global, unless it's set to another file that exists
-	local excludes
+	local excludes ours reason=""
+	ours="$(native_path "$DOTFILES/git/gitignore_global")"
 	excludes="$(git config --global --get core.excludesfile 2>/dev/null || true)"
-	if [ -z "$excludes" ] || { [ ! -f "${excludes/#\~/$HOME}" ] && [ "$excludes" != "$(native_path "$DOTFILES/git/gitignore_global")" ]; }; then
-		git config --global core.excludesfile "$(native_path "$DOTFILES/git/gitignore_global")"
-		echo "  Set core.excludesfile to the repo's gitignore_global${excludes:+, replacing the missing $excludes}"
+	if [ -z "$excludes" ]; then
+		reason="it wasn't set"
+	elif [ "$excludes" != "$ours" ] && [ ! -f "${excludes/#\~/$HOME}" ]; then
+		reason="replacing $excludes, which doesn't exist"
+	elif [ "$excludes" != "$ours" ] && is_dotfiles_copy "$excludes"; then
+		reason="replacing $excludes, from another copy of this repo"
+	fi
+	if [ -n "$reason" ]; then
+		git config --global core.excludesfile "$ours"
+		echo "  Set core.excludesfile to the repo's gitignore_global ($reason)"
 	fi
 }
 
@@ -255,7 +354,9 @@ setup_iterm() {
 	echo "iTerm:"
 	local current_folder
 	current_folder="$(defaults read com.googlecode.iterm2 PrefsCustomFolder 2>/dev/null || true)"
-	if [ "$(defaults read com.googlecode.iterm2 LoadPrefsFromCustomFolder 2>/dev/null || true)" = 1 ] && [ -d "$current_folder" ]; then
+	if [ "$(defaults read com.googlecode.iterm2 LoadPrefsFromCustomFolder 2>/dev/null || true)" = 1 ] &&
+		[ -d "$current_folder" ] &&
+		{ [ "$current_folder" = "$DOTFILES/config/iterm" ] || ! is_dotfiles_copy "$current_folder"; }; then
 		echo "  iTerm already loads settings from $current_folder"
 		return
 	fi
@@ -344,6 +445,10 @@ install_gitleaks() {
 
 setup_repo_hooks() {
 	echo "Repo:"
+	if [ "$IS_GIT_CLONE" = 0 ]; then
+		echo "  Skipping commit checks and gitleaks - this copy isn't a git clone, so it can't be committed from"
+		return
+	fi
 	git -C "$DOTFILES" config core.hooksPath .githooks
 	echo "  Enabled pre-commit checks for secrets, personal info and syntax errors"
 	install_gitleaks
@@ -388,6 +493,7 @@ check_startup_files() {
 		warn_if_found "$file" "$content" '(jenv|pyenv|rbenv) init' "sets up jenv/pyenv/rbenv outside the dotfiles block, which already does."
 		warn_if_found "$file" "$content" '\.fig/' "still loads Fig, which has been discontinued."
 		warn_if_found "$file" "$content" 'shell-scripts' "still refers to the old shell-scripts repo."
+		warn_if_found "$file" "$content" '(^|[[:space:];])(export[[:space:]]+)?HOME=' "changes HOME, so the shell and other programs (e.g. git in VS Code) can disagree about where your home folder is."
 		if [ "$file" = "$HOME/.zshrc" ]; then
 			warn_if_found "$file" "$content" '(source|\.)[[:space:]].*\.bashrc' "loads ~/.bashrc, but zsh now gets everything from the dotfiles block."
 		fi
@@ -398,6 +504,18 @@ check_startup_files() {
 		if [ "$WARNINGS" -gt "$file_warnings" ]; then
 			detail "Everything outside the '$MARKER_START' block in $file still runs. If it's old config,"
 			detail "back it up and start fresh: mv $file $file.old && $DOTFILES/install.sh"
+		fi
+	done
+
+	# The block itself should match what this copy of the repo would write (it may point at a
+	# moved or different copy, or be from an older version of install.sh)
+	local expected_file expected
+	for expected_file in "$HOME/.bashrc:shell/bashrc.sh" "$HOME/.zshrc:shell/zshrc.sh"; do
+		file="${expected_file%%:*}"
+		[ -f "$file" ] && grep -qxF "$MARKER_START" "$file" || continue
+		expected="$(shell_block "${expected_file#*:}")"
+		if [ "$(block_contents "$file")" != "$expected" ]; then
+			warning "the dotfiles block in $file is out of date or points at another copy of the repo - run ./install.sh"
 		fi
 	done
 
@@ -465,15 +583,20 @@ check_reminders() {
 		note "~/.shell_local is still the unedited template - set your name, email etc. there (run: open-local)"
 		reminders_shown=1
 	fi
-	if [ "$(git -C "$DOTFILES" config --get core.hooksPath || true)" != .githooks ]; then
+	# The rest only matter for committing, which needs a git clone
+	if [ "$IS_GIT_CLONE" = 0 ]; then
+		:
+	elif [ "$(git -C "$DOTFILES" config --get core.hooksPath || true)" != .githooks ]; then
 		warning "the pre-commit checks aren't turned on for this repo - run ./install.sh"
 		reminders_shown=1
 	fi
-	if ! has_gitleaks; then
+	if [ "$IS_GIT_CLONE" = 1 ] && ! has_gitleaks; then
 		note "gitleaks isn't installed, so commits to this repo will be blocked until it is."
 		reminders_shown=1
 	fi
-	if [ ! -f "$HOME/.dotfiles_blocklist" ] || ! grep -qvE '^[[:space:]]*(#|$)' "$HOME/.dotfiles_blocklist"; then
+	if [ "$IS_GIT_CLONE" = 0 ]; then
+		:
+	elif [ ! -f "$HOME/.dotfiles_blocklist" ] || ! grep -qvE '^[[:space:]]*(#|$)' "$HOME/.dotfiles_blocklist"; then
 		note "~/.dotfiles_blocklist has no entries. If you commit to this repo from this machine, add"
 		detail "your personal strings (emails, employer names...) or copy the file from another machine."
 		reminders_shown=1

@@ -11,6 +11,17 @@ git clone <this repo> ~/dotfiles   # anywhere is fine
 
 Then open a new terminal. Re-running `install.sh` is safe, and repairs anything that's out of date.
 
+### Where to put it
+
+Anywhere permanent, called anything. `install.sh` works out where it is and points your shell and git at that folder, so:
+
+- **Don't leave it in Downloads or a temporary folder,** and avoid cloud-synced folders (OneDrive, Dropbox, iCloud). Windows often syncs Desktop and Documents to OneDrive. `~/dotfiles` is a good choice. `install.sh` warns about these.
+- **If you move or rename it later, run `install.sh` from the new location.** Until you do, new terminals print a message saying they can't find it.
+- **Use `git clone`, not "Download ZIP".** A ZIP copy works, but can't be updated with `update-dotfiles` or committed from.
+- **Only one copy is used at a time:** whichever you last ran `install.sh` from.
+
+`install.sh` prints the repo and home folders it's using. On Windows it shows both forms, e.g. `/c/Users/you (C:\Users\you)`. In Git Bash, `~` is your Windows user folder (`C:\Users\<you>`) unless a `HOME` environment variable says otherwise. WSL is a separate Linux system with its own home folder, so clone and install there separately if you use it.
+
 To check a machine without changing anything:
 
 ```sh

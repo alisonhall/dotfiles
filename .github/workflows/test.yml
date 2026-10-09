@@ -72,6 +72,32 @@ jobs:
           ./install.sh | tee repair.txt
           grep -q 'Updated the dotfiles block' repair.txt
 
+      - name: Works from any folder name, with spaces in the repo and home paths
+        # (cd + pwd turns the Windows runner's D:\a\_temp into /d/a/_temp)
+        run: |
+          tmp="$(cd "$RUNNER_TEMP" && pwd)"
+          mkdir -p "$tmp/Jane Doe"
+          git clone -q . "$tmp/My Stuff/dot files (copy)"
+          HOME="$tmp/Jane Doe" "$tmp/My Stuff/dot files (copy)/install.sh"
+          HOME="$tmp/Jane Doe" "$tmp/My Stuff/dot files (copy)/install.sh" --check
+
+      - name: New shells explain when the repo has moved, and install.sh repairs it
+        run: |
+          tmp="$(cd "$RUNNER_TEMP" && pwd)"
+          mv "$tmp/My Stuff" "$tmp/Moved Stuff"
+          HOME="$tmp/Jane Doe" bash -ic true 2> moved.txt || true
+          grep -q "can't find" moved.txt || { cat moved.txt; exit 1; }
+          HOME="$tmp/Jane Doe" "$tmp/Moved Stuff/dot files (copy)/install.sh" | tee moved-install.txt
+          grep -q 'It loaded the dotfiles from' moved-install.txt
+
+      - name: Works when downloaded as a ZIP (no .git folder)
+        run: |
+          tmp="$(cd "$RUNNER_TEMP" && pwd)"
+          mkdir -p "$tmp/zip" "$tmp/zip-home"
+          git archive HEAD | tar -x -C "$tmp/zip"
+          HOME="$tmp/zip-home" "$tmp/zip/install.sh" | tee zip.txt
+          grep -q "isn't a git clone" zip.txt
+
       - name: Shell functions and git aliases work
         # Output goes to files rather than `| head`, which fails under the runner's pipefail
         # (showa and git aliases print colour codes, so only match single words)

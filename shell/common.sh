@@ -82,6 +82,10 @@ alias open-gitconfig='code ~/.gitconfig "$DOTFILES/git/gitconfig"'
 
 # update-dotfiles: Pull the latest dotfiles and reload them
 update-dotfiles () {
+	if [ ! -e "$DOTFILES/.git" ]; then
+		echo "Can't update: $DOTFILES isn't a git clone (downloaded as a ZIP?). Clone the repo and run its install.sh."
+		return 1
+	fi
 	git -C "$DOTFILES" pull && source "$HOME/.${DOTFILES_SHELL}rc"
 }
 alias get-updated-scripts='update-dotfiles'
