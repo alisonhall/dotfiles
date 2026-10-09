@@ -32,7 +32,7 @@ The installer doesn't replace your existing config files. It:
 ## What goes where
 
 | | Shared (in this repo) | This machine only (not in the repo) |
-|---|---|---|
+| --- | --- | --- |
 | Shell | `shell/` (see below) | `~/.shell_local` |
 | Git | `git/gitconfig`, `git/gitignore_global` | `~/.gitconfig` (below the include) |
 | Prompt (zsh) | `config/p10k.zsh` | `~/.p10k.zsh`, if present, is used instead |
@@ -44,7 +44,7 @@ Put anything personal, work-specific or specific to one computer in the local fi
 ### Shell files
 
 | File | Contents |
-|---|---|
+| --- | --- |
 | `shell/bashrc.sh`, `shell/zshrc.sh` | Shell-specific setup (oh-my-zsh, prompt, completion); each loads `common.sh` |
 | `shell/common.sh` | Environment, `PATH`, tool setup (nvm/fnm, jenv, pyenv, rbenv, z) |
 | `shell/common/*.sh` | Aliases and functions for both shells: terminal, system, dev, git |
@@ -59,7 +59,7 @@ Tools that edit your shell config themselves (conda, nvm and similar) write to `
 Everything in `bin/` is on your `PATH`.
 
 | Script | What it does |
-|---|---|
+| --- | --- |
 | `colours_and_formatting.sh` | Reference for terminal colour and formatting codes (`-a` for everything) |
 | `timestamps.sh` | Common `date` formats, with their output right now |
 | `format-git-objects.sh` | Source it to get `$allFormatOptions`, a list of every `git for-each-ref --format` field |

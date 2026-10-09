@@ -1,0 +1,81 @@
+# Checks the repo's shell files, then runs install.sh on fresh macOS, Linux and Windows
+# machines to make sure it sets everything up, is safe to re-run, and can repair itself.
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install zsh
+        run: sudo apt-get update -q && sudo apt-get install -y -q zsh
+
+      - name: Syntax check (bash and zsh)
+        run: bash tools/check-syntax.sh
+
+      - name: shellcheck (errors only)
+        # git-branch-status is a third-party script, kept as its authors wrote it
+        run: |
+          shellcheck --version
+          shellcheck -S error -s bash install.sh .githooks/pre-commit tools/*.sh \
+            shell/bashrc.sh shell/common.sh shell/common/*.sh shell/os/*.sh \
+            $(ls bin/* | grep -v git-branch-status)
+
+  install:
+    name: Install (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      DOTFILES_SKIP_GITLEAKS: "1"
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install zsh
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -q && sudo apt-get install -y -q zsh
+
+      - name: First install
+        run: ./install.sh
+
+      - name: Second install changes nothing
+        run: |
+          ./install.sh | tee second-run.txt
+          if grep -E 'Added|Updated|Removed|Backed up|Created' second-run.txt; then
+            echo "::error::The second run changed something - install.sh should be safe to re-run"
+            exit 1
+          fi
+
+      - name: --check passes
+        run: ./install.sh --check
+
+      - name: Works with macOS's built-in bash 3.2
+        if: runner.os == 'macOS'
+        run: /bin/bash ./install.sh --check
+
+      - name: Repairs the setup after the repo moves
+        run: |
+          sed -i.orig 's|^export DOTFILES=.*|export DOTFILES="/moved/away"|' ~/.bashrc
+          ./install.sh | tee repair.txt
+          grep -q 'Updated the dotfiles block' repair.txt
+
+      - name: Shell functions and git aliases work
+        run: |
+          bash -ic 'print-workspace-variables && type ll && showa killport | head -3'
+          if command -v zsh >/dev/null; then
+            zsh -ic 'print-workspace-variables && type ll'
+          fi
+          git aliases | head -3

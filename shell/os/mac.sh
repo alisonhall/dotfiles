@@ -50,7 +50,7 @@ EOT
 
 #   spotlight: Search for a file using MacOS Spotlight's metadata
 #   -----------------------------------------------------------
-spotlight () { mdfind "kMDItemDisplayName == '$@'wc"; }
+spotlight () { mdfind "kMDItemDisplayName == '$*'wc"; }
 
 alias make1mb='mkfile 1m ./1MB.dat'         # make1mb:      Creates a file of 1mb size (all zeros)
 alias make5mb='mkfile 5m ./5MB.dat'         # make5mb:      Creates a file of 5mb size (all zeros)

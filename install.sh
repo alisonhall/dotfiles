@@ -392,7 +392,7 @@ check_startup_files() {
 			warn_if_found "$file" "$content" '(source|\.)[[:space:]].*\.bashrc' "loads ~/.bashrc, but zsh now gets everything from the dotfiles block."
 		fi
 		alias_count="$(printf '%s\n' "$content" | grep -cE '^[[:space:]]*alias ' || true)"
-		if [ "$alias_count" -ge 10 ]; then
+		if [ "$alias_count" -ge 20 ]; then
 			warning "$file defines $alias_count aliases outside the dotfiles block - is it a copy of an old config?"
 		fi
 		if [ "$WARNINGS" -gt "$file_warnings" ]; then
