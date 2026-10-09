@@ -30,6 +30,9 @@
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 failed=0
 work_dir="$(mktemp -d)"
+
+# Treat files as bytes - macOS awk stops at non-ASCII characters (like curly quotes) otherwise
+export LC_ALL=C
 trap 'rm -rf "$work_dir"' EXIT
 
 # Kept as their authors wrote them
@@ -402,10 +405,8 @@ if [ -f "$gitconfig" ] && command -v git >/dev/null 2>&1; then
 			n = split(problems, list, "\n")
 			for (i = 1; i <= n; i++) if (list[i] != "") print $1 " = " $2 "  (" list[i] ")"
 		}' "$work_dir/git-aliases")"
-	git_os="$(printf '%s\n' "$git_os" | while IFS= read -r line; do
-		name="${line%% =*}"
-		case "$ignored" in *" $name "*) ;; *) printf '%s\n' "$line" ;; esac
-	done)"
+	# (awk rather than a case statement: bash 3.2 misreads a case pattern's ) inside $(...))
+	git_os="$(printf '%s\n' "$git_os" | awk -v ignored="$ignored" '!index(ignored, " " $1 " ")')"
 
 	report "Git aliases git can't run:" "$(printf '%s\n%s\n' "${run_problems%$'\n'}" "$loops" | sed '/^$/d')"
 	report "Git ! aliases that fail in sh:" "$(printf '%s\n' "$sh_problems" | sed '/^$/d')"
