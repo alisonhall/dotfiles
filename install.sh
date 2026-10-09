@@ -1,13 +1,22 @@
 #!/usr/bin/env bash
 #
-# Points this machine's shell and git config at this repo.
+# Points this machine's shell and git config at this repo, then checks that it all works.
 #
-# Usage: ./install.sh
+# Usage:
+#   ./install.sh           Set up (or repair) this machine
+#   ./install.sh --check   Only run the checks - change nothing
 #
 # Safe to re-run: every step checks whether it has already been done.
 # Existing files are added to, never replaced. Anything that's a symlink
 # (e.g. into an old dotfiles repo) is moved aside to <file>.bak.<timestamp>
 # first so nothing gets written through it.
+#
+# Set DOTFILES_SKIP_GITLEAKS=1 to skip installing gitleaks (e.g. in CI).
+
+# Re-run with bash if started some other way (e.g. `sh install.sh` or `zsh install.sh`)
+if [ -z "${BASH_VERSION:-}" ]; then
+	exec bash "$0" "$@"
+fi
 
 set -euo pipefail
 
@@ -16,6 +25,32 @@ MARKER_START="# >>> dotfiles >>>"
 MARKER_END="# <<< dotfiles <<<"
 TIMESTAMP="$(date +%Y%m%d%H%M%S)"
 
+MODE=install
+case "${1:-}" in
+	"") ;;
+	--check) MODE=check ;;
+	-h | --help)
+		awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"
+		exit 0
+		;;
+	*)
+		echo "Unknown option: $1 (see ./install.sh --help)"
+		exit 2
+		;;
+esac
+
+#   -------------------------------
+#   HELPERS
+#   -------------------------------
+
+PROBLEMS=0
+WARNINGS=0
+ok() { echo "  OK: $*"; }
+note() { echo "  NOTE: $*"; }
+warning() { echo "  WARNING: $*"; WARNINGS=$((WARNINGS + 1)); }
+problem() { echo "  PROBLEM: $*"; PROBLEMS=$((PROBLEMS + 1)); }
+detail() { echo "    $*"; }
+
 # Git for Windows needs native paths (D:/...) rather than Git Bash paths (/d/...)
 native_path() {
 	if command -v cygpath >/dev/null 2>&1; then
@@ -23,6 +58,12 @@ native_path() {
 	else
 		printf '%s\n' "$1"
 	fi
+}
+
+git_version_at_least() {
+	local major minor
+	read -r major minor <<<"$(git --version | sed -E 's/^[^0-9]*([0-9]+)\.([0-9]+).*/\1 \2/')"
+	[ "$major" -gt "$1" ] || { [ "$major" -eq "$1" ] && [ "$minor" -ge "$2" ]; }
 }
 
 move_aside_if_symlink() {
@@ -55,9 +96,9 @@ ensure_block() {
 	fi
 
 	if ! grep -qxF "$MARKER_END" "$file"; then
-		echo "  PROBLEM: $file has a '$MARKER_START' line but no '$MARKER_END' line."
-		echo "    Fix or delete the block by hand, then run install.sh again."
-		return 1
+		problem "$file has a '$MARKER_START' line but no '$MARKER_END' line."
+		detail "Fix or delete the block by hand, then run install.sh again."
+		return
 	fi
 
 	current="$(awk -v start="$MARKER_START" -v end="$MARKER_END" '
@@ -75,6 +116,34 @@ ensure_block() {
 		$0 == end { skip = 0 }
 		!skip' "$file.bak.$TIMESTAMP" > "$file"
 	echo "  Updated the dotfiles block in $file (it was out of date; old version in $file.bak.$TIMESTAMP)"
+}
+
+#   -------------------------------
+#   BEFORE STARTING
+#   -------------------------------
+
+# Anything that would make setup fail or do the wrong thing. Stops before changing anything.
+preflight() {
+	echo "Before starting:"
+	local problems_before=$PROBLEMS output
+
+	if [ "$(id -u)" = 0 ] && [ -z "${DOTFILES_ALLOW_ROOT:-}" ]; then
+		problem "running as root (e.g. with sudo) would set up root's home folder ($HOME), not yours."
+		detail "Run it as yourself, without sudo."
+	fi
+
+	if ! command -v git >/dev/null 2>&1; then
+		problem "git isn't installed."
+	fi
+
+	if ! output="$(bash "$DOTFILES/tools/check-syntax.sh")"; then
+		problem "the repo's shell files have errors, which every new terminal would hit:"
+		echo "$output"
+	fi
+
+	if [ "$PROBLEMS" -eq "$problems_before" ]; then
+		ok "running as $(id -un) with bash $BASH_VERSION and git $(git --version | awk '{ print $3 }'); the repo's files pass syntax checks"
+	fi
 }
 
 #   -------------------------------
@@ -117,6 +186,15 @@ setup_shell() {
 #   GIT
 #   -------------------------------
 
+git_unset_include() {
+	if git_version_at_least 2 30; then
+		git config --global --fixed-value --unset include.path "$1"
+	else
+		# Older git only matches by regex, so escape the path
+		git config --global --unset include.path "^$(printf '%s' "$1" | sed 's/[][\.*^$+?(){}|]/\\&/g')\$"
+	fi
+}
+
 # ~/.gitconfig includes the shared config from this repo at the top, so anything
 # set below it (user.name, user.email, machine-specific paths) overrides it.
 setup_git() {
@@ -134,7 +212,7 @@ setup_git() {
 			"$include_path") ;;
 			*/git/gitconfig)
 				if [ ! -f "$old_path" ]; then
-					git config --global --fixed-value --unset include.path "$old_path"
+					git_unset_include "$old_path"
 					echo "  Removed include of $old_path (file no longer exists)"
 				fi
 				;;
@@ -164,12 +242,6 @@ setup_git() {
 		git config --global core.excludesfile "$(native_path "$DOTFILES/git/gitignore_global")"
 		echo "  Set core.excludesfile to the repo's gitignore_global${excludes:+, replacing the missing $excludes}"
 	fi
-
-	if ! git config --global --get user.email >/dev/null 2>&1; then
-		echo "  NOTE: no git user set on this machine. Run:"
-		echo "    git config --global user.name \"Your Name\""
-		echo "    git config --global user.email \"you@example.com\""
-	fi
 }
 
 #   -------------------------------
@@ -183,7 +255,7 @@ setup_iterm() {
 	echo "iTerm:"
 	local current_folder
 	current_folder="$(defaults read com.googlecode.iterm2 PrefsCustomFolder 2>/dev/null || true)"
-	if [ "$(defaults read com.googlecode.iterm2 LoadPrefsFromCustomFolder 2>/dev/null)" = 1 ] && [ -d "$current_folder" ]; then
+	if [ "$(defaults read com.googlecode.iterm2 LoadPrefsFromCustomFolder 2>/dev/null || true)" = 1 ] && [ -d "$current_folder" ]; then
 		echo "  iTerm already loads settings from $current_folder"
 		return
 	fi
@@ -241,9 +313,17 @@ download_gitleaks() {
 	return $result
 }
 
+has_gitleaks() {
+	command -v gitleaks >/dev/null 2>&1 || [ -x "$HOME/.local/bin/gitleaks" ] || [ -x "$HOME/.local/bin/gitleaks.exe" ]
+}
+
 install_gitleaks() {
-	if command -v gitleaks >/dev/null 2>&1 || [ -x "$HOME/.local/bin/gitleaks" ] || [ -x "$HOME/.local/bin/gitleaks.exe" ]; then
+	if has_gitleaks; then
 		echo "  gitleaks is installed"
+		return
+	fi
+	if [ -n "${DOTFILES_SKIP_GITLEAKS:-}" ]; then
+		echo "  Skipping gitleaks install (DOTFILES_SKIP_GITLEAKS is set)"
 		return
 	fi
 
@@ -256,16 +336,16 @@ install_gitleaks() {
 	elif download_gitleaks; then
 		echo "  Installed gitleaks to ~/.local/bin"
 	else
-		echo "  NOTE: couldn't install gitleaks. Commits to this repo will be blocked until it's installed:"
-		echo "    https://github.com/gitleaks/gitleaks#installing"
-		echo "  (Using the dotfiles doesn't need it - only committing to this repo does.)"
+		note "couldn't install gitleaks. Commits to this repo will be blocked until it's installed:"
+		detail "https://github.com/gitleaks/gitleaks#installing"
+		detail "(Using the dotfiles doesn't need it - only committing to this repo does.)"
 	fi
 }
 
 setup_repo_hooks() {
 	echo "Repo:"
 	git -C "$DOTFILES" config core.hooksPath .githooks
-	echo "  Enabled pre-commit checks for secrets and personal info"
+	echo "  Enabled pre-commit checks for secrets, personal info and syntax errors"
 	install_gitleaks
 	if [ ! -f "$HOME/.dotfiles_blocklist" ]; then
 		cat > "$HOME/.dotfiles_blocklist" <<'EOF'
@@ -279,44 +359,202 @@ EOF
 }
 
 #   -------------------------------
-#   CHECK
+#   CHECKS
 #   -------------------------------
 
-# Starts each shell the way a new terminal would and checks it loaded this repo
-verify_setup() {
-	echo "Check:"
-	local problems=0 shell result
-	for shell in bash zsh; do
-		[ "$shell" = zsh ] && { command -v zsh >/dev/null 2>&1 || continue; }
-		result="$(DOTFILES_WELCOME=false "$shell" -ic 'typeset -f showa >/dev/null && echo "LOADED:$DOTFILES"' </dev/null 2>/dev/null | tail -n 1)"
-		if [ "$result" = "LOADED:$DOTFILES" ]; then
-			echo "  OK: new $shell shells load the dotfiles from $DOTFILES"
-		else
-			echo "  PROBLEM: a new $shell shell didn't load the dotfiles (got: ${result:-nothing})"
-			problems=$((problems + 1))
+# warn_if_found <file> <content> <regex> <message>
+warn_if_found() {
+	if printf '%s\n' "$2" | grep -qE "$3"; then
+		warning "$1 $4"
+	fi
+}
+
+# Startup files can still contain old config outside the dotfiles block (e.g. a copy of an
+# old .zshrc). It all still runs, so it can load things twice, override the dotfiles, or
+# stop the shell before it reaches the block.
+check_startup_files() {
+	echo "Startup files:"
+	local warnings_before=$WARNINGS problems_before=$PROBLEMS file content alias_count output shells shell
+
+	for file in "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.zshrc"; do
+		[ -f "$file" ] || continue
+		local file_warnings=$WARNINGS
+
+		# Ignore comment lines
+		content="$(without_dotfiles_block "$file" | grep -vE '^[[:space:]]*#' || true)"
+		warn_if_found "$file" "$content" 'oh-my-zsh\.sh' "loads oh-my-zsh outside the dotfiles block, which already loads it."
+		warn_if_found "$file" "$content" 'powerlevel10k|p10k\.zsh|POWERLEVEL9K_' "sets up the powerlevel10k prompt outside the dotfiles block, which already does."
+		warn_if_found "$file" "$content" 'nvm\.sh' "loads nvm outside the dotfiles block, which already loads it (the nvm installer adds this; it can be removed)."
+		warn_if_found "$file" "$content" '(jenv|pyenv|rbenv) init' "sets up jenv/pyenv/rbenv outside the dotfiles block, which already does."
+		warn_if_found "$file" "$content" '\.fig/' "still loads Fig, which has been discontinued."
+		warn_if_found "$file" "$content" 'shell-scripts' "still refers to the old shell-scripts repo."
+		if [ "$file" = "$HOME/.zshrc" ]; then
+			warn_if_found "$file" "$content" '(source|\.)[[:space:]].*\.bashrc' "loads ~/.bashrc, but zsh now gets everything from the dotfiles block."
+		fi
+		alias_count="$(printf '%s\n' "$content" | grep -cE '^[[:space:]]*alias ' || true)"
+		if [ "$alias_count" -ge 10 ]; then
+			warning "$file defines $alias_count aliases outside the dotfiles block - is it a copy of an old config?"
+		fi
+		if [ "$WARNINGS" -gt "$file_warnings" ]; then
+			detail "Everything outside the '$MARKER_START' block in $file still runs. If it's old config,"
+			detail "back it up and start fresh: mv $file $file.old && $DOTFILES/install.sh"
 		fi
 	done
 
-	if git config --get-all include.path | grep -qxF "$(native_path "$DOTFILES/git/gitconfig")" &&
-		[ "$(git config --get alias.aliases | head -c 1)" = '!' ]; then
-		echo "  OK: git loads the shared config"
-	else
-		echo "  PROBLEM: git isn't loading $DOTFILES/git/gitconfig"
-		problems=$((problems + 1))
+	# A syntax error stops the shell reading the file, so it might never reach the dotfiles block
+	for file in "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.profile" "$HOME/.zshrc" "$HOME/.shell_local"; do
+		[ -f "$file" ] || continue
+		case "$file" in
+			*/.zshrc) shells=zsh ;;
+			*/.shell_local) shells="bash zsh" ;;
+			*) shells=bash ;;
+		esac
+		for shell in $shells; do
+			command -v "$shell" >/dev/null 2>&1 || continue
+			if ! output="$("$shell" -n "$file" 2>&1)"; then
+				problem "$file has a $shell syntax error, so $shell stops reading it there:"
+				echo "$output" | sed 's/^/    /'
+			fi
+		done
+	done
+
+	if [ "$WARNINGS" -eq "$warnings_before" ] && [ "$PROBLEMS" -eq "$problems_before" ]; then
+		ok "no old config or syntax errors found"
 	fi
-	return $problems
 }
 
-setup_shell
-setup_git
-setup_iterm
-setup_repo_hooks
-echo
-if verify_setup; then
+# Settings in ~/.gitconfig override the shared config. A few personal ones are expected
+# (user.name etc.), but overriding shared ones usually means an old copy of the config.
+check_gitconfig() {
+	echo "Git config:"
+	local gitconfig="$HOME/.gitconfig" overlap count
+	if [ ! -f "$gitconfig" ]; then
+		problem "$gitconfig doesn't exist - run ./install.sh"
+		return
+	fi
+	overlap="$(comm -12 \
+		<(git config --file "$gitconfig" --name-only --list | sort -u) \
+		<(git config --file "$DOTFILES/git/gitconfig" --name-only --list | sort -u))"
+	if [ -n "$overlap" ]; then
+		count="$(printf '%s\n' "$overlap" | wc -l | tr -d ' ')"
+		warning "$gitconfig sets $count things the shared git config also sets, so the shared versions are ignored:"
+		detail "$(printf '%s\n' "$overlap" | head -5 | paste -sd ' ' -)$([ "$count" -gt 5 ] && echo " ...")"
+		detail "If $gitconfig is a copy of an old config, keep only [user] and machine-specific settings below the include."
+	else
+		ok "$gitconfig doesn't override the shared config"
+	fi
+}
+
+check_reminders() {
+	echo "Reminders:"
+	local reminders_shown=0
+
+	if ! git config --global --get user.email >/dev/null 2>&1; then
+		note "no git user set on this machine. Run:"
+		detail "git config --global user.name \"Your Name\""
+		detail "git config --global user.email \"you@example.com\""
+		reminders_shown=1
+	fi
+	if [ -f "$HOME/.shell_local" ] && cmp -s "$HOME/.shell_local" "$DOTFILES/local.example.sh"; then
+		note "~/.shell_local is still the unedited template - set your name, email etc. there (run: open-local)"
+		reminders_shown=1
+	fi
+	if [ "$(git -C "$DOTFILES" config --get core.hooksPath || true)" != .githooks ]; then
+		warning "the pre-commit checks aren't turned on for this repo - run ./install.sh"
+		reminders_shown=1
+	fi
+	if ! has_gitleaks; then
+		note "gitleaks isn't installed, so commits to this repo will be blocked until it is."
+		reminders_shown=1
+	fi
+	if [ ! -f "$HOME/.dotfiles_blocklist" ] || ! grep -qvE '^[[:space:]]*(#|$)' "$HOME/.dotfiles_blocklist"; then
+		note "~/.dotfiles_blocklist has no entries. If you commit to this repo from this machine, add"
+		detail "your personal strings (emails, employer names...) or copy the file from another machine."
+		reminders_shown=1
+	fi
+
+	if [ "$reminders_shown" = 0 ]; then
+		ok "nothing to follow up"
+	fi
+}
+
+# Starts each shell the way a new terminal would, checks it loaded this repo,
+# and reports anything it printed as an error and how long it took
+check_new_shells() {
+	echo "New shells:"
+	local shell result errors elapsed stdout_file stderr_file
+	local TIMEFORMAT=%R
+	stdout_file="$(mktemp)"
+	stderr_file="$(mktemp)"
+
+	for shell in bash zsh; do
+		command -v "$shell" >/dev/null 2>&1 || continue
+		elapsed="$( { time DOTFILES_WELCOME=false BASH_SILENCE_DEPRECATION_WARNING=1 \
+			"$shell" -ic 'typeset -f dotfiles_welcome >/dev/null && echo "LOADED:$DOTFILES"' \
+			</dev/null >"$stdout_file" 2>"$stderr_file"; } 2>&1 )" || true
+		result="$(tail -n 1 "$stdout_file")"
+
+		if [ "$result" = "LOADED:$DOTFILES" ]; then
+			ok "new $shell shells load the dotfiles from $DOTFILES (${elapsed}s)"
+		else
+			problem "a new $shell shell didn't load the dotfiles from $DOTFILES - see the startup file and error messages."
+		fi
+
+		# Ignore the noise from starting an interactive shell without a terminal
+		errors="$(grep -vE 'terminal process group|no job control|tcsetattr|Inappropriate ioctl|default interactive shell is now zsh|chsh -s /bin/zsh|HT208050|^[[:space:]]*$' "$stderr_file" || true)"
+		if [ -n "$errors" ]; then
+			warning "new $shell shells print errors while starting:"
+			printf '%s\n' "$errors" | head -10 | cut -c1-200 | sed 's/^/    /'
+		fi
+
+		if awk -v t="$elapsed" 'BEGIN { exit !(t > 1.0) }'; then
+			warning "new $shell shells take ${elapsed}s to start. Slow steps are often nvm, \`yarn global bin\` or \`brew --prefix\`."
+		fi
+	done
+	rm -f "$stdout_file" "$stderr_file"
+
+	if git config --get-all include.path | grep -qxF "$(native_path "$DOTFILES/git/gitconfig")" &&
+		[ "$(git config --get alias.aliases | head -c 1)" = '!' ]; then
+		ok "git loads the shared config"
+	else
+		problem "git isn't loading $DOTFILES/git/gitconfig"
+	fi
+}
+
+#   -------------------------------
+#   MAIN
+#   -------------------------------
+
+preflight
+if [ "$PROBLEMS" -gt 0 ]; then
 	echo
-	echo "Done. Open a new terminal to load the changes."
-else
-	echo
-	echo "Finished with problems - see above."
+	echo "Stopped before changing anything - fix the problems above, then run install.sh again."
 	exit 1
+fi
+
+if [ "$MODE" = install ]; then
+	setup_shell
+	setup_git
+	setup_iterm
+	setup_repo_hooks
+fi
+
+echo
+check_startup_files
+check_gitconfig
+check_new_shells
+check_reminders
+
+echo
+if [ "$PROBLEMS" -gt 0 ]; then
+	echo "Finished with $PROBLEMS problem(s) and $WARNINGS warning(s) - see above."
+	exit 1
+elif [ "$MODE" = check ] && [ "$WARNINGS" -gt 0 ]; then
+	echo "Checks finished with $WARNINGS warning(s) - see above."
+elif [ "$MODE" = check ]; then
+	echo "All checks passed."
+elif [ "$WARNINGS" -gt 0 ]; then
+	echo "Done, with $WARNINGS warning(s) - see above. Open a new terminal to load the changes."
+else
+	echo "Done. Open a new terminal to load the changes."
 fi

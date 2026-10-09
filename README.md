@@ -9,7 +9,15 @@ git clone <this repo> ~/dotfiles   # anywhere is fine
 ~/dotfiles/install.sh
 ```
 
-Then open a new terminal. Re-running `install.sh` is safe.
+Then open a new terminal. Re-running `install.sh` is safe, and repairs anything that's out of date.
+
+To check a machine without changing anything:
+
+```sh
+~/dotfiles/install.sh --check
+```
+
+Both report `PROBLEM`s (something is broken; exits with an error), `WARNING`s (likely to cause trouble, such as old config that still runs alongside the dotfiles, errors or slowness when a new shell starts, or `~/.gitconfig` overriding the shared settings) and `NOTE`s (reminders).
 
 The installer doesn't replace your existing config files. It:
 
@@ -18,6 +26,7 @@ The installer doesn't replace your existing config files. It:
 - creates `~/.shell_local` from [local.example.sh](local.example.sh)
 - on macOS, points iTerm at `config/iterm` for its settings
 - installs gitleaks if it's missing (see [Committing](#committing))
+- before changing anything, stops if it's run as root, git is missing, or the repo's shell files have syntax errors or Windows line endings
 - finally, starts a new bash (and zsh) shell and checks that it loads this repo, and that git loads the shared config
 
 ## What goes where
@@ -69,3 +78,4 @@ Everything in `bin/` is on your `PATH`.
 
 - secrets, found by [gitleaks](https://github.com/gitleaks/gitleaks), which you need to install
 - any string listed in `~/.dotfiles_blocklist`, a local list of your own emails, hostnames and similar
+- shell syntax errors or Windows line endings, checked by `tools/check-syntax.sh`

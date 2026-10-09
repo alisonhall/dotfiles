@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 #
-# This repo is public. Blocks commits that contain secrets or personal info.
+# This repo is public. Blocks commits that contain secrets or personal info,
+# or shell files with syntax errors.
 #
 # Bypass a single check:  SKIP_GITLEAKS=1 git commit ...
 
 status=0
+patterns=()
 
 # 1. Secrets (API keys, tokens, passwords) - https://github.com/gitleaks/gitleaks
 # install.sh may have put it in ~/.local/bin, which GUI git clients don't have on PATH
@@ -41,6 +43,16 @@ if [ -f "$blocklist" ]; then
 			status=1
 		fi
 	fi
+fi
+if [ "${#patterns[@]}" -eq 0 ]; then
+	echo "pre-commit: WARNING - ~/.dotfiles_blocklist is missing or empty, so personal strings (emails," >&2
+	echo "  employer names...) aren't being checked. Copy it from another machine or add your own." >&2
+fi
+
+# 3. Shell syntax, so a broken file never reaches other machines
+if ! "$(git rev-parse --show-toplevel)/tools/check-syntax.sh" >&2; then
+	echo "pre-commit: fix the errors above before committing." >&2
+	status=1
 fi
 
 exit $status
