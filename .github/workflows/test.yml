@@ -74,12 +74,17 @@ jobs:
 
       - name: Shell functions and git aliases work
         # Output goes to files rather than `| head`, which fails under the runner's pipefail
+        # (showa and git aliases print colour codes, so only match single words)
         run: |
+          expect() {  # expect <file> <text>: fail, showing the file, if it doesn't contain the text
+            grep -q "$2" "$1" || { echo "::error::'$2' not found in $1:"; cat "$1"; exit 1; }
+          }
           bash -ic 'print-workspace-variables && type ll && showa killport' > bash-output.txt
-          grep -q 'DOTFILES_OS:' bash-output.txt && grep -q 'killport ()' bash-output.txt
+          expect bash-output.txt 'DOTFILES_OS:'
+          expect bash-output.txt 'killport'
           if command -v zsh >/dev/null; then
             zsh -ic 'print-workspace-variables && type ll' > zsh-output.txt
-            grep -q 'DOTFILES_OS:' zsh-output.txt
+            expect zsh-output.txt 'DOTFILES_OS:'
           fi
           git aliases > git-aliases.txt
-          grep -q 'cwip' git-aliases.txt
+          expect git-aliases.txt 'cwip'
