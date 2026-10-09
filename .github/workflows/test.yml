@@ -73,9 +73,13 @@ jobs:
           grep -q 'Updated the dotfiles block' repair.txt
 
       - name: Shell functions and git aliases work
+        # Output goes to files rather than `| head`, which fails under the runner's pipefail
         run: |
-          bash -ic 'print-workspace-variables && type ll && showa killport | head -3'
+          bash -ic 'print-workspace-variables && type ll && showa killport' > bash-output.txt
+          grep -q 'DOTFILES_OS:' bash-output.txt && grep -q 'killport ()' bash-output.txt
           if command -v zsh >/dev/null; then
-            zsh -ic 'print-workspace-variables && type ll'
+            zsh -ic 'print-workspace-variables && type ll' > zsh-output.txt
+            grep -q 'DOTFILES_OS:' zsh-output.txt
           fi
-          git aliases | head -3
+          git aliases > git-aliases.txt
+          grep -q 'cwip' git-aliases.txt
