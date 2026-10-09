@@ -59,7 +59,7 @@ Put anything personal, work-specific or specific to one computer in the local fi
 | `shell/bashrc.sh`, `shell/zshrc.sh` | Shell-specific setup (oh-my-zsh, prompt, completion); each loads `common.sh` |
 | `shell/common.sh` | Environment, `PATH`, tool setup (nvm/fnm, jenv, pyenv, rbenv, z) |
 | `shell/common/*.sh` | Aliases and functions for both shells: terminal, system, dev, git |
-| `shell/os/mac.sh`, `shell/os/windows.sh` | OS-specific versions, loaded last on that OS only |
+| `shell/os/mac.sh`, `shell/os/linux.sh`, `shell/os/windows.sh` | OS-specific versions, loaded last on that OS only |
 
 Run `showa <text>` to find where an alias or function is defined.
 
@@ -97,3 +97,10 @@ Everything in `bin/` is on your `PATH`.
   - unquoted path variables, which break on paths with spaces (`C:\Users\Jane Doe`, `/Library/Application Support`)
   - backslash Windows paths in shell code
   - Mac- or Windows-only paths outside `shell/os/` without an OS or exists check
+- broken or OS-specific aliases, checked by `tools/check-aliases.sh`:
+  - shell aliases with syntax errors in their bodies, names a shell rejects, or double quotes that expand `$VAR` too early
+  - commands an OS doesn't have (e.g. `pbcopy`, `clip`, `lsof` in Git Bash) without a version in `shell/os/` for that OS
+  - options only in the GNU (Linux, Git Bash) or BSD (macOS) version of a tool, like `sed -i`, `date --utc` or `grep -P`
+  - git aliases git can't run (`git ...` inside an alias, built-in names, loops), and `!` aliases with syntax errors or bash-only syntax (git runs them with `sh`, which is `dash` on Ubuntu and WSL)
+
+  To allow a line on purpose, add a comment containing `alias-check: ignore`.

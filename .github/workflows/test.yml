@@ -27,6 +27,9 @@ jobs:
       - name: No OS-specific file names or paths
         run: bash tools/check-portability.sh
 
+      - name: Aliases are valid on every OS (with dash, Ubuntu's sh, for git aliases)
+        run: bash tools/check-aliases.sh
+
       - name: shellcheck (errors only)
         # git-branch-status is a third-party script, kept as its authors wrote it
         run: |
@@ -60,6 +63,7 @@ jobs:
           bash tools/check-syntax.sh
           bash tools/check-paths.sh
           bash tools/check-portability.sh
+          bash tools/check-aliases.sh
 
       - name: First install
         run: ./install.sh

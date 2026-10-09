@@ -29,13 +29,13 @@
 	aliases = "!grepalias() { git config --get-regexp '^alias\\.' | awk -v nr=2 '{sub(/^alias\\./,\"\")};{printf \"\\033[31m%-20s\\033[1;37m\", $1};{sep=FS};{for (x=nr; x<=NF; x++) {printf \"%s%s\", sep, $x; }; print \"\\033[0;39m\"}'; }; grepalias"
 	finda = "!grepalias() { git config --get-regexp '^alias\\.' | grep -i \"$1\" | awk -v nr=2 '{sub(/^alias\\./,\"\")};{printf \"\\033[31m%-20s\\033[1;37m\", $1};{sep=FS};{for (x=nr; x<=NF; x++) {printf \"%s%s\", sep, $x; }; print \"\\033[0;39m\"}'; }; grepalias"
 	config-user-name = config user.name # use as-is to see the current user's name. Add a string after this command to change the current user's name.
-	config-user-name-COMMENT = !echo "use as-is to see the current user's name. Add a string after this command to change the current user's name."
+	config-user-name-COMMENT = !echo \"use as-is to see the current user's name. Add a string after this command to change the current user's name.\"
 	config-user-email = config user.email # use as-is to see the current user's email. Add a string after this command to change the current user's email.
-	config-user-email-COMMENT = !echo "use as-is to see the current user's email. Add a string after this command to change the current user's email."
+	config-user-email-COMMENT = !echo \"use as-is to see the current user's email. Add a string after this command to change the current user's email.\"
 
 	##### CLEANUP
 		# See: delete-merged-local-branches OR bclean
-		# See: prune
+		# See: prune-origin
 		# See: worktree-prune
 		garbage-collection = gc
 
@@ -56,22 +56,19 @@
 
 	##### PUSH
 		pu = "!f() { \
-			local LAST_COMMIT_MESSAGE=$(git last-commit-message); \
-			local PUSH_ARGS=\"$*\"; \
-			if [[ $LAST_COMMIT_MESSAGE == *WIP* ]] && [[ $LAST_COMMIT_MESSAGE != *temp/WIP-improvements* ]]; then \
+			if git last-commit-is-wip; then \
 				echo Preventing push due to the previous commit message includes WIP; \
-				echo Previous commit message: \"$LAST_COMMIT_MESSAGE\"; \
+				echo Previous commit message: \"$(git last-commit-message)\"; \
 			else \
-				git push $PUSH_ARGS;\
+				git push \"$@\"; \
 			fi; \
-			unset -f f; \
 		}; f"
 		push-no-verify = push --no-verify
-		push-reset='git push $CURRENT_REMOTE_NAME $CURRENT_BRANCH --force'
+		push-reset = "!git push \"${CURRENT_REMOTE_NAME:-origin}\" \"$(git branch-name)\" --force"
 		push-and-delete-local-branch = push -d # git push --delete  ==> push local branch to remote and delete local branch
-		push-and-delete-local-branch-COMMENT = !echo "git push --delete  ==> push local branch to remote and delete local branch"
+		push-and-delete-local-branch-COMMENT = !echo \"git push --delete  ==> push local branch to remote and delete local branch\"
 		publish = !git push -u origin $(git branch-name) # Push the current branch to the remote "origin", and set it to track the upstream branch
-		publish-COMMENT = !echo "Push the current branch to the remote 'origin', and set it to track the upstream branch"
+		publish-COMMENT = !echo \"Push the current branch to the remote 'origin', and set it to track the upstream branch\"
 		show-upstream = rev-parse --abbrev-ref --symbolic-full-name @{upstream}
 		push-set-upstream = !git push -u origin $(git branch-name)
 		pu-private = !git push private $(git branch-name) --no-verify
@@ -92,19 +89,16 @@
 
 	##### MERGE
 		m = "!f() { \
-			local LAST_COMMIT_MESSAGE=$(git last-commit-message); \
-			local MERGE_ARGS=\"$*\"; \
-			if [[ $LAST_COMMIT_MESSAGE == *WIP* ]] && [[ $LAST_COMMIT_MESSAGE != *temp/WIP-improvements* ]]; then \
+			if git last-commit-is-wip; then \
 				echo Preventing merge due to the previous commit message includes WIP; \
-				echo Previous commit message: \"$LAST_COMMIT_MESSAGE\"; \
+				echo Previous commit message: \"$(git last-commit-message)\"; \
 			else \
-				git merge $MERGE_ARGS;\
+				git merge \"$@\"; \
 			fi; \
-			unset -f f; \
 		}; f"
 		merge-no-commit = merge --no-commit --no-ff
 		merge-with-commit = merge --no-ff # force a merge commit to be created
-		merge-with-commit-COMMENT = !echo "force a merge commit to be created"
+		merge-with-commit-COMMENT = !echo \"force a merge commit to be created\"
 
 	##### ADD
 		add-all = add -A
@@ -116,38 +110,38 @@
 
 	##### DIFF
 		sortdiff = !sh -c 'git diff "$@" | grep "^[+-]" | sort --key=1.2 | uniq -u -s1' # diff ignoring line number changes
-		sortdiff-COMMENT = !echo "diff ignoring line number changes"
+		sortdiff-COMMENT = !echo \"diff ignoring line number changes\"
 		commit-changes = "!f() { git diff \"$1^!\"; }; f"
 		commit-compare = "!git diff $1 $2"
 		commit-changes-print = diff-tree -p
 
 	##### TAGS
 		create-basic-tag = tag # git tag <tagname> or git tag <tagname> <commit ID>
-		create-basic-tag-COMMENT = !echo "git tag <tagname> or git tag <tagname> <commit ID>"
+		create-basic-tag-COMMENT = !echo \"git tag <tagname> or git tag <tagname> <commit ID>\"
 		create-full-tag = tag -a # git tag -a <tagname> -m "<message associated with tag>" or git tag -a <tagname> <commmit ID> -m "<message associated with tag>"
-		create-full-tag-COMMENT = !echo "git tag -a <tagname> -m '<message associated with tag>' or git tag -a <tagname> <commit ID> -m '<message associated with tag>'"
+		create-full-tag-COMMENT = !echo \"git tag -a <tagname> -m '<message associated with tag>' or git tag -a <tagname> <commit ID> -m '<message associated with tag>'\"
 		t = create-full-tag
 		list-all-tags = tag
-		list-all-tags-with-details = g tag -l --format='%(color:yellow)%(tag):%(color:green) %(objectname:short):%(color:white) %(subject)%(color:normal)'
+		list-all-tags-with-details = tag -l --format='%(color:yellow)%(tag):%(color:green) %(objectname:short):%(color:white) %(subject)%(color:normal)'
 		list-remote-tags = ls-remote --tags origin
 		filter-tags-list = tag -l # git tag -l <text>*
-		filter-tags-list-COMMENT = !echo "git tag -l <text>*"
+		filter-tags-list-COMMENT = !echo \"git tag -l <text>*\"
 		ah-tags = tag -l AH-*
 		wip-tags = tag -l *WIP*
 		push-one-tag = push origin <tagname> # git push <remote> <tagname>
-		push-one-tag-COMMENT = !echo "git push <remote> <tagname>"
+		push-one-tag-COMMENT = !echo \"git push <remote> <tagname>\"
 		push-all-tags = push origin --tags
 		delete-local-tag = tag -d # git tag -d <tagname>
-		delete-local-tag-COMMENT = !echo "git tag -d <tagname>"
+		delete-local-tag-COMMENT = !echo \"git tag -d <tagname>\"
 		delete-remote-tag = push origin --delete # git push origin --delete <tagname>
-		delete-remote-tag-COMMENT = !echo "git push origin --delete <tagname>"
+		delete-remote-tag-COMMENT = !echo \"git push origin --delete <tagname>\"
 		override-local-tags-with-remote = fetch --tags --force
 
 
 	##### LOG
 		l = log --oneline --decorate --graph --all
 		last = log -l HEAD # log last commit
-		last-COMMENT = !echo "log last commit"
+		last-COMMENT = !echo \"log last commit\"
 		last-commit-changes = log -p -1
 		cwip = "!git log -g --grep=WIP --author=\"$(git config user.name)\" --no-merges"
 		loga = log --graph --all --date=short --decorate=full --pretty=format:'%C(auto)%h %d %s %C(dim)[%an] %ar'
@@ -159,13 +153,21 @@
 			git log --no-merges --pretty='%C(auto)%h %d  %s %Cblue -- %ar, %an' --graph ${OLD_BRANCH}..${RECENT_BRANCH}; \
 			unset -f f; \
 		}; f"
-		log-branch-COMMENT = !echo "This compares the commit difference from this branch (or 1st arg) with the master branch (or 2nd arg). Command: git log --no-merges --pretty='%Cred%h %C(yellow)%d %Creset %Cgreen %s %Cblue -- %ar, %an' --graph ${OLD_BRANCH}..${RECENT_BRANCH};"
+		log-branch-COMMENT = !echo \"This compares the commit difference from this branch (or 1st arg) with the master branch (or 2nd arg). Command: git log --no-merges --pretty='%Cred%h %C(yellow)%d %Creset %Cgreen %s %Cblue -- %ar, %an' --graph \\${OLD_BRANCH}..\\${RECENT_BRANCH}\"
 		log-short = "!git log --graph --decorate --oneline --first-parent --pretty=format:'%C(auto)%h%d  %s  %Cblue-- %ar, %an'"
 		log-all = log --date=short --all --since=2.months.ago --pretty=format:'%C(auto)%h %d %s %C(dim)[%an] %ar'
 		log-all-me = "!git log --date=short --all --since=2.months.ago --author=\"$(git config user.name)\" --pretty=format:'%C(auto)%h %d %s %C(dim)[%an] %ar'"
 		log-all-me-graph = "!git log --date=short --all --graph --decorate --since=2.months.ago --author=\"$(git config user.name)\" --pretty=format:'%C(yellow)%h %C(auto)%d %C(white)%s %C(dim)[%an] %ar'"
 		log-all-me-4-days = "!git log --date=short --all --graph --decorate --since=4.days.ago --author=\"$(git config user.name)\" --pretty=format:'%C(auto)%h %d %s %C(dim)[%an] %ar'"
 		last-commit-message = !sh -c 'git log --pretty="format:%Creset%s" -1 | cat'
+		# Succeeds if the last commit message contains WIP (except temp/WIP-improvements). Used by pu, m, co-wip and com.
+		last-commit-is-wip = "!f() { \
+			case \"$(git last-commit-message)\" in \
+				*temp/WIP-improvements*) return 1 ;; \
+				*WIP*) return 0 ;; \
+				*) return 1 ;; \
+			esac; \
+		}; f"
 		log-search = !git log --pretty --no-merges --grep
 		log-search2 = log -S
 		log-search-all = !git log -g --pretty --grep
@@ -179,11 +181,10 @@
 		search-orphan-commits = !git reflog --all | grep
 
 	##### SHOW
-		show-file-names = --pretty="" --name-only
+		show-file-names = show --pretty= --name-only
 		show-file-names2 = diff-tree --no-commit-id --name-only -r
 
 	##### BRANCH
-		branch-status = branch-status
 		branch-name = !git rev-parse --abbrev-ref HEAD
 		br = branch
 		b = br
@@ -199,26 +200,26 @@
 		bmerged = branch --merged
 		not-merged = branch --no-merged
 		rename-local-branch = branch -m
-		rename-local-branch-COMMENT = !echo "Changing currently checked out branch: git branch –m <new-name> OR Changing other branch: git branch –m <old-name> <new-name>"
+		rename-local-branch-COMMENT = !echo \"Changing currently checked out branch: git branch –m <new-name> OR Changing other branch: git branch –m <old-name> <new-name>\"
 		rename-remote-branch = "!f(){ \
 			git push origin :$1 $2 --no-verify;\
 			git push origin -u $2 --no-verify;\
 			};f"
-		rename-remote-branch-COMMENT = !echo "Note: Deletes old branch before recreating with new branch name. Usage: g rename-remote-branch <old-name> <new-name>"
+		rename-remote-branch-COMMENT = !echo \"Note: Deletes old branch before recreating with new branch name. Usage: g rename-remote-branch <old-name> <new-name>\"
 		rename-local-and-remote-branch = "!f(){ \
 			git branch -m $1;\
 			git push origin :$(git branch-name) $1 --no-verify;\
 			git push origin -u $1 --no-verify;\
 			};f"
-		rename-remote-and-remote-branch-COMMENT = !echo "Note: Deletes old remote branch before recreating with new branch name. Usage: g rename-remote-branch <new-name>"
+		rename-remote-and-remote-branch-COMMENT = !echo \"Note: Deletes old remote branch before recreating with new branch name. Usage: g rename-remote-branch <new-name>\"
 		delete-merged-local-branches = !sh -c 'git branch --merged ${1} | grep -v "\\* ${1}" | xargs -n 1 git branch -d'
 		search-branch-names = !sh -c 'git branch -a | grep -i --color=auto $*' --
 		delete-local-branch = branch -d  # git branch --delete <branch-name>
-		delete-local-branch-COMMENT = !echo "git branch --delete <branch-name>"
+		delete-local-branch-COMMENT = !echo \"git branch --delete <branch-name>\"
 		delete-remote-branch = push origin --delete # git push <remote-name> --delete <branch-name>  OR git push <remote-name> :<branch-name>
-		delete-remote-branch-COMMENT = !echo "git push <remote-name> --delete <branch-name>  OR git push <remote-name> :<branch-name>"
+		delete-remote-branch-COMMENT = !echo \"git push <remote-name> --delete <branch-name>  OR git push <remote-name> :<branch-name>\"
 		delete-remote-version-of-current-branch = !git push origin :$(git branch-name) # Delete the remote version of the current branch
-		delete-remote-version-of-current-branch-COMMENT = !echo "Delete the remote version of the current branch"
+		delete-remote-version-of-current-branch-COMMENT = !echo \"Delete the remote version of the current branch\"
 		update-upstream = !git branch $(git branch-name) --set-upstream-to origin/$(git branch-name)
 		set-upstream-on-push = !git push --set-upstream origin $(git branch-name)
 		remove-upstream = branch --unset-upstream
@@ -230,13 +231,13 @@
 				echo I do not contain commit $1;\
 			fi;\
 			};f"
-		current-branch-contains-commit-COMMENT = !echo "Prints statement for whether the current branch contains a commit or not. git merge-base --is-ancestor $1 HEAD;"
+		current-branch-contains-commit-COMMENT = !echo \"Prints statement for whether the current branch contains a commit or not. git merge-base --is-ancestor \\$1 HEAD\"
 		# branch-contains-commit = !git branch --contains $* | grep master
-		# branch-contains-commit-COMMENT = !echo "Output the branch-name if the commit exists in that branch: git branch --contains <commit-id> | grep <branch-name>"
+		# branch-contains-commit-COMMENT = !echo \"Output the branch-name if the commit exists in that branch: git branch --contains <commit-id> | grep <branch-name>\"
 		# branch-contains-commit-ver2 = !git log master | grep $*
-		# branch-contains-commit-COMMENT = !echo "Output the commit ID if the commit is within the master branch: git log <branch-name> | grep <commit-id>"
+		# branch-contains-commit-COMMENT = !echo \"Output the commit ID if the commit is within the master branch: git log <branch-name> | grep <commit-id>\"
 		# branch-contains-commit-ver3 = !git rev-list master | grep `git rev-parse $*`
-		# branch-contains-commit-COMMENT = !echo "Output the commit ID if the commit is within the master branch: git rev-list <branch-name | grep `git rev-parse <commit-id>`"
+		# branch-contains-commit-COMMENT = !echo \"Output the commit ID if the commit is within the master branch: git rev-list <branch-name | grep `git rev-parse <commit-id>`\"
 		branch-status-graph = log --all --graph --decorate --oneline --simplify-by-decoration
 		local-no-remote-branch = !git branch -vv | cut -c 3- | awk '$3 !~/\\[/ { print $1 }'
 		local-no-remote-origin-branch = !git branch -vv | cut -c 3- | awk '$3 !~/\\[origin/ { print $1 }'
@@ -252,29 +253,27 @@
 		list-remotes = remote -v
 		list-remotes-with-details = remote -vv
 		show-remote-details = remote show # ex. git remote show origin
-		show-remote-details-COMMENT = !echo "ex. git remote show origin"
+		show-remote-details-COMMENT = !echo \"ex. git remote show origin\"
 		change-remote = !git remote set-url $CURRENT_REMOTE_NAME  #ex. git remote set-url origin git@github.com:user/repo.git
-		change-remote-COMMENT = !echo "ex. git remote set-url origin git@github.com:user/repo.git"
+		change-remote-COMMENT = !echo \"ex. git remote set-url origin git@github.com:user/repo.git\"
 		change-remote-push = !git remote set-url --push $CURRENT_REMOTE_NAME  #ex. git remote set-url origin git@github.com:user/repo.git
-		change-remote-push-COMMENT = !echo "ex. git remote set-url origin git@github.com:user/repo.git"
+		change-remote-push-COMMENT = !echo \"ex. git remote set-url origin git@github.com:user/repo.git\"
 		add-remote = remote add origin #ex. git remote add origin git@github.com:user/repo.git
-		add-remote-COMMENT = !echo "ex. git remote add origin git@github.com:user/repo.git"
+		add-remote-COMMENT = !echo \"ex. git remote add origin git@github.com:user/repo.git\"
 		rename-remote = remote rename #ex. git remote rename old-name new-name
-		rename-remote-COMMENT = !echo "ex. git remote rename old-name new-name"
+		rename-remote-COMMENT = !echo \"ex. git remote rename old-name new-name\"
 		remove-remote = remote remove #ex. git remote remove origin
-		remove-remote-COMMENT = !echo "ex. git remote remove origin"
+		remove-remote-COMMENT = !echo \"ex. git remote remove origin\"
 
 	##### RESET
 		unstage = reset HEAD -- # git reset HEAD -- <file-name>  --> unstage file name
-		unstage-COMMENT = !echo "git reset HEAD -- <file-name>  --> unstage file name"
-		prune = remote prune origin
+		unstage-COMMENT = !echo \"git reset HEAD -- <file-name>  --> unstage file name\"
+		prune-origin = remote prune origin # git ignores an alias called "prune" (a built-in command)
 		remove-local-commit = reset HEAD~ # remove local commit, keep files
-		remove-local-commit-COMMENT = !echo "remove local commit, keep files"
-		reset = reset HEAD~ # remove local commit, keep files
-		reset-COMMENT = !echo "remove local commit, keep files"
+		remove-local-commit-COMMENT = !echo \"remove local commit, keep files\"
 		reset-undo = reset HEAD@{1}
 		clear = reset --hard HEAD # remove local commit, delete file changes within commit
-		clear-COMMENT = !echo "remove local commit, delete file changes within commit"
+		clear-COMMENT = !echo \"remove local commit, delete file changes within commit\"
 		cancel-merge = reset --merge
 		undo-commit = reset --soft HEAD^
 		undo-2-commits = reset --soft HEAD~2
@@ -283,32 +282,32 @@
 		undo-stash-apply = !sh -c 'git stash show -p | git apply -R'
 		undo-pushed-merge = !sh -c 'git revert -m 1 $1'
 		reset-branch = !git reset origin/$(git branch-name) # Setting the local branch to exactly match the remote branch, keep files
-		reset-branch-COMMENT = !echo "Setting the local branch to exactly match the remote branch, keep files"
+		reset-branch-COMMENT = !echo \"Setting the local branch to exactly match the remote branch, keep files\"
 		reset-branch-hard = !git reset --hard origin/$(git branch-name) # Setting the local branch to exactly match the remote branch and forcibly remove all local file changes
-		reset-branch-hard-COMMENT = !echo "Setting the local branch to exactly match the remote branch and forcibly remove all local file changes"
+		reset-branch-hard-COMMENT = !echo \"Setting the local branch to exactly match the remote branch and forcibly remove all local file changes\"
 		undo-merge = revert -m 1
-		undo-merge-COMMENT = !echo "Undo a specific merge commit by using 'git revert -m 1 <COMMIT_ID>'"
+		undo-merge-COMMENT = !echo \"Undo a specific merge commit by using 'git revert -m 1 <COMMIT_ID>'\"
 
 	##### STASH
 		sh = stash
 		shm = stash save
 		shl = stash list --format='%Cred%h %C(yellow)%gd %C(cyan)(%cr): %C(auto)%gs' # List the stashes
-		shl-COMMENT = !echo "List the stashes"
+		shl-COMMENT = !echo \"List the stashes\"
 		shll = stash list --format='%n%n%Cred%h %C(yellow)%gd %C(cyan)(%cr): %C(auto)%gs' --stat # List the stashes and files changed within each
-		shll-COMMENT = !echo "List the stashes and files changed within each"
+		shll-COMMENT = !echo \"List the stashes and files changed within each\"
 		shs = !sh -c 'git stash show -p stash@{$1}' -- # Show the full diff of the stash
-		shs-COMMENT = !echo "Show the full diff of the stash"
+		shs-COMMENT = !echo \"Show the full diff of the stash\"
 		shd = !sh -c 'git stash drop stash@{$1}' -- # Delete the named stash
-		shd-COMMENT = !echo "Delete the named stash"
+		shd-COMMENT = !echo \"Delete the named stash\"
 		sha = !sh -c 'git stash apply stash@{$1}' -- # Apply the changes in the named stash
-		sha-COMMENT = !echo "Apply the changes in the named stash"
-		shp = git stash push -p
+		sha-COMMENT = !echo \"Apply the changes in the named stash\"
+		shp = stash push -p
 		stash-partial = stash push -p -m # save partials to stash, iterating through each hunk, and save to the name in quotes after this command
-		stash-partial-COMMENT = !echo "save partials to stash, iterating through each hunk, and save to the name in quotes after this command"
+		stash-partial-COMMENT = !echo \"save partials to stash, iterating through each hunk, and save to the name in quotes after this command\"
 		stash-save = stash push -u -m # save to stash to the name in quotes after this command
-		stash-save-COMMENT = !echo "save to stash to the name in quotes after this command"
+		stash-save-COMMENT = !echo \"save to stash to the name in quotes after this command\"
 		stash-unstaged = stash save -k -u # stash all unstaged files (even new files)
-		stash-unstaged-COMMENT = !echo "stash all unstaged files (even new files). Any text after this alias is the stash's name"
+		stash-unstaged-COMMENT = !echo \"stash all unstaged files (even new files). Any text after this alias is the stash's name\"
 		stash-staged = "!f() { \
 			git stash --keep-index; \
 			git stash save \"$1\"; \
@@ -317,7 +316,7 @@
 			git stash drop stash@{1}; \
 			unset -f f; \
 		}; f"
-		stash-staged-COMMENT = !echo "Stash the staged changes"
+		stash-staged-COMMENT = !echo \"Stash the staged changes\"
 		# stash-staged = "!f() { \
 		# 	#Stash everything temporarily.  Keep staged files, discard everything else after stashing. \
 		# 	git stash --keep-index; \
@@ -341,7 +340,7 @@
 
 	##### REBASE
 		rebase-interactive = !sh -c 'git rebase -i HEAD~"$1"' --
-		rebase-interactive-COMMENT = !echo "interactively rebase the last specified # (arg) of commits ago"
+		rebase-interactive-COMMENT = !echo \"interactively rebase the last specified number (arg) of commits\"
 		rebase-find-commits-num = !sh -c 'git log --graph --decorate --oneline HEAD~"$1"..HEAD' --
 		rebase-continue = rebase --continue
 		rebase-cancel = rebase --abort
@@ -349,46 +348,41 @@
 	##### WORKTREE
 		worktree-list = worktree list
 		worktree-add = worktree add # git worktree add ../new-worktree-dir some-existing-branch
-		worktree-add-COMMENT = !echo "git worktree add ../new-worktree-dir some-existing-branch"
+		worktree-add-COMMENT = !echo \"git worktree add ../new-worktree-dir some-existing-branch\"
 		worktree-add-from-existing-branch = worktree add -b # git worktree add new-branch ../new-worktree-dir
-		worktree-add-from-existing-branch-COMMENT = !echo "git worktree add new-branch ../new-worktree-dir"
+		worktree-add-from-existing-branch-COMMENT = !echo \"git worktree add new-branch ../new-worktree-dir\"
 		worktree-remove = worktree remove # git worktree remove ../worktree-dir
-		worktree-remove-COMMENT = !echo "git worktree remove ../worktree-dir"
+		worktree-remove-COMMENT = !echo \"git worktree remove ../worktree-dir\"
 		worktree-prune = worktree prune
 		worktree-move = worktree move # git worktree move <worktree> <new-path>
-		worktree-move-COMMENT = !echo "git worktree move <worktree> <new-path>"
+		worktree-move-COMMENT = !echo \"git worktree move <worktree> <new-path>\"
 
 	##### COMMIT
 		co = commit
 		co-wip = "!f() { \
-			local LAST_COMMIT_MESSAGE=$(git last-commit-message); \
-			if [[ $LAST_COMMIT_MESSAGE == *WIP* ]] && [[ $LAST_COMMIT_MESSAGE != *temp/WIP-improvements* ]]; then \
+			if git last-commit-is-wip; then \
 				echo Preventing commit due to the previous commit message includes WIP; \
-				echo Previous commit message: \"$LAST_COMMIT_MESSAGE\"; \
+				echo Previous commit message: \"$(git last-commit-message)\"; \
 			else \
 				git add -A; \
-				git commit -m \"WIP\" --no-verify;\
+				git commit -m WIP --no-verify; \
 			fi; \
-			unset -f f; \
 		}; f"
+		# com <message> [-m <details>] [other git commit options]
 		com = "!f() { \
-			local LAST_COMMIT_MESSAGE=$(git last-commit-message); \
-			local COMMIT_MESSAGE=\"$1\"; \
-			local SECONDARY_MESSAGE; \
-			shift; \
-			if [ \"$1\" == \"-m\" ] && [ -n \"$2\" ]; then \
-				local SECONDARY_MESSAGE=\"$2\"; \
-				shift; \
-				shift; \
+			message=\"$1\"; \
+			details=; \
+			[ $# -gt 0 ] && shift; \
+			if [ \"$1\" = -m ] && [ -n \"$2\" ]; then \
+				details=\"$2\"; \
+				shift 2; \
 			fi; \
-			local COMMIT_ARGS=\"$*\"; \
-			if [[ $LAST_COMMIT_MESSAGE == *WIP* ]] && [[ $LAST_COMMIT_MESSAGE != *temp/WIP-improvements* ]]; then \
+			if git last-commit-is-wip; then \
 				echo Preventing commit due to the previous commit message includes WIP; \
-				echo Previous commit message: \"$LAST_COMMIT_MESSAGE\"; \
+				echo Previous commit message: \"$(git last-commit-message)\"; \
 			else \
-				git commit -m \"$COMMIT_MESSAGE\" -m \"$SECONDARY_MESSAGE\" $COMMIT_ARGS; \
+				git commit -m \"$message\" -m \"$details\" \"$@\"; \
 			fi; \
-			unset -f f; \
 		}; f"
 		# ---- COMMIT WITH JIRA TAG PREFIX ---- START ----
 		# comt = "!f() { \
@@ -419,13 +413,13 @@
 		# com-check = !sh -c '[[ $# == 0 ]] && echo "No arguments, $#" || echo "Has arguments, $#"'
 		# com-check = !sh -c '[[ -z "$1" ]] && echo "Has arguments, $("$1")" || echo "Has no arguments, $("$1")"'
 		com-check = "!f() { \
-			if [ $@ -ne 0 ]; then \
+			if [ $# -ne 0 ]; then \
 				echo Has arguments; \
 			else \
 				echo No arguments; \
 			fi; \
 		}; f"
-		com-check-COMMENT = !echo "Check if command has arguments or not"
+		com-check-COMMENT = !echo \"Check if command has arguments or not\"
 		# com-check = !sh -c '\
 		# 	if [ "$@" -ne 0 ]; then \
 		# 		echo Has arguments; \

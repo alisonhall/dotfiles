@@ -69,4 +69,10 @@ if ! bash "$repo_root/tools/check-portability.sh" >&2; then
 	status=1
 fi
 
+# 6. Shell and git aliases that are broken, or only work on some OSes
+if ! bash "$repo_root/tools/check-aliases.sh" >&2; then
+	echo "pre-commit: fix the alias problems above before committing." >&2
+	status=1
+fi
+
 exit $status
