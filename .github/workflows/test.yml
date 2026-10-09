@@ -24,6 +24,9 @@ jobs:
       - name: No hard-coded paths
         run: bash tools/check-paths.sh
 
+      - name: No OS-specific file names or paths
+        run: bash tools/check-portability.sh
+
       - name: shellcheck (errors only)
         # git-branch-status is a third-party script, kept as its authors wrote it
         run: |
@@ -50,6 +53,13 @@ jobs:
       - name: Install zsh
         if: runner.os == 'Linux'
         run: sudo apt-get update -q && sudo apt-get install -y -q zsh
+
+      - name: Repo checks work on this OS
+        # The commit hook runs these on whatever machine you commit from (e.g. macOS's bash 3.2 and BSD awk)
+        run: |
+          bash tools/check-syntax.sh
+          bash tools/check-paths.sh
+          bash tools/check-portability.sh
 
       - name: First install
         run: ./install.sh

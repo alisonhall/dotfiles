@@ -10,7 +10,7 @@
 #      -> use "$DOTFILES/bin/timestamps.sh"
 #   3. Hard-coded home folders, e.g. /Users/me or C:\Users\me -> use $HOME or ~
 #
-# Markdown files are skipped for 2 and 3, since docs show example paths on purpose.
+# Markdown files and the check scripts are skipped for 2 and 3, since they show example paths on purpose.
 # To allow a line anyway, add a comment to it containing: path-check: ignore
 #
 # Used by the pre-commit hook and the GitHub Actions tests.
@@ -27,10 +27,11 @@ while IFS= read -r file; do
 done < <(git ls-files 2>/dev/null || find . -type f -not -path './.git/*' | sed 's|^\./||')
 [ ${#files[@]} -gt 0 ] || exit 0
 
+# Rules 2 and 3 skip docs, and the check scripts themselves (their messages show example paths)
 code_files=()
 for file in "${files[@]}"; do
 	case "$file" in
-		*.md) ;;
+		*.md | tools/check-*.sh) ;;
 		*) code_files+=("$file") ;;
 	esac
 done

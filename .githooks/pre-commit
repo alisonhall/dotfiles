@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
 # This repo is public. Blocks commits that contain secrets or personal info,
-# shell files with syntax errors, or paths that only work on one machine.
+# shell files with syntax errors, paths that only work on one machine, or file
+# names and paths that only work on some operating systems.
 #
 # Bypass a single check:  SKIP_GITLEAKS=1 git commit ...
 
@@ -59,6 +60,12 @@ fi
 # 4. Hard-coded paths, so the repo keeps working wherever it's cloned
 if ! bash "$repo_root/tools/check-paths.sh" >&2; then
 	echo "pre-commit: replace the hard-coded paths above before committing." >&2
+	status=1
+fi
+
+# 5. File names and paths that only work on some OSes
+if ! bash "$repo_root/tools/check-portability.sh" >&2; then
+	echo "pre-commit: fix the portability problems above before committing." >&2
 	status=1
 fi
 
