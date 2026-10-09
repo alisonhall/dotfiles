@@ -13,11 +13,12 @@ Then open a new terminal. Re-running `install.sh` is safe.
 
 The installer doesn't replace your existing config files. It:
 
-- adds a small block to `~/.bashrc`, `~/.bash_profile` and `~/.zshrc` that loads `shell/` from this repo
-- adds an include for `git/gitconfig` to the top of `~/.gitconfig` and backs up the original first
+- adds a small block to `~/.bashrc`, `~/.bash_profile` and `~/.zshrc` that loads `shell/` from this repo, creating the files if needed. If the block is already there but out of date (e.g. you moved the repo), it's updated in place. `~/.bash_profile` is skipped if it, or `~/.profile` on Linux, already loads `~/.bashrc`
+- adds an include for `git/gitconfig` to the top of `~/.gitconfig` and backs up the original first, removing includes of a dotfiles gitconfig that no longer exists
 - creates `~/.shell_local` from [local.example.sh](local.example.sh)
 - on macOS, points iTerm at `config/iterm` for its settings
 - installs gitleaks if it's missing (see [Committing](#committing))
+- finally, starts a new bash (and zsh) shell and checks that it loads this repo, and that git loads the shared config
 
 ## What goes where
 

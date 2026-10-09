@@ -33,59 +33,78 @@ move_aside_if_symlink() {
 	fi
 }
 
-has_dotfiles_block() {
-	[ -f "$1" ] && grep -qF "$MARKER_START" "$1"
+# Prints a file with the dotfiles block (markers included) removed
+without_dotfiles_block() {
+	awk -v start="$MARKER_START" -v end="$MARKER_END" '
+		$0 == start { skip = 1; next }
+		$0 == end { skip = 0; next }
+		!skip' "$1"
+}
+
+# ensure_block <file> <contents>: Make sure <file> has a dotfiles block with exactly <contents>.
+# Creates the file if needed, appends the block if it's missing, and replaces the block's
+# contents if they're out of date (e.g. the repo has moved). Everything else in the file is kept.
+ensure_block() {
+	local file="$1" contents="$2" current
+	move_aside_if_symlink "$file"
+
+	if [ ! -f "$file" ] || ! grep -qxF "$MARKER_START" "$file"; then
+		printf '\n%s\n%s\n%s\n' "$MARKER_START" "$contents" "$MARKER_END" >> "$file"
+		echo "  Added dotfiles block to $file"
+		return
+	fi
+
+	if ! grep -qxF "$MARKER_END" "$file"; then
+		echo "  PROBLEM: $file has a '$MARKER_START' line but no '$MARKER_END' line."
+		echo "    Fix or delete the block by hand, then run install.sh again."
+		return 1
+	fi
+
+	current="$(awk -v start="$MARKER_START" -v end="$MARKER_END" '
+		$0 == start { inside = 1; next }
+		$0 == end { inside = 0 }
+		inside' "$file")"
+	if [ "$current" = "$contents" ]; then
+		echo "  $file is already set up"
+		return
+	fi
+
+	cp "$file" "$file.bak.$TIMESTAMP"
+	DOTFILES_BLOCK="$contents" awk -v start="$MARKER_START" -v end="$MARKER_END" '
+		$0 == start { print; print ENVIRON["DOTFILES_BLOCK"]; skip = 1; next }
+		$0 == end { skip = 0 }
+		!skip' "$file.bak.$TIMESTAMP" > "$file"
+	echo "  Updated the dotfiles block in $file (it was out of date; old version in $file.bak.$TIMESTAMP)"
 }
 
 #   -------------------------------
 #   SHELL
 #   -------------------------------
 
-# Appends a block to a shell startup file that loads the matching file from this repo
-add_shell_block() {
-	local rc_file="$1" repo_file="$2"
-	move_aside_if_symlink "$rc_file"
-
-	if has_dotfiles_block "$rc_file"; then
-		echo "  $rc_file is already set up"
-		return
-	fi
-
-	cat >> "$rc_file" <<EOF
-
-$MARKER_START
-export DOTFILES="$DOTFILES"
-source "\$DOTFILES/$repo_file"
-$MARKER_END
-EOF
-	echo "  Added dotfiles block to $rc_file"
+shell_block() {
+	printf 'export DOTFILES="%s"\nsource "$DOTFILES/%s"' "$DOTFILES" "$1"
 }
 
-# macOS Terminal and Git Bash open login shells, which read ~/.bash_profile but not ~/.bashrc
-add_bash_profile_block() {
+# macOS Terminal and Git Bash open login shells, which read ~/.bash_profile but not ~/.bashrc.
+# On Linux, bash reads ~/.bash_profile *instead of* ~/.profile, so don't create one there if
+# ~/.profile already loads ~/.bashrc (as it does on Ubuntu and Debian).
+setup_bash_profile() {
 	local profile="$HOME/.bash_profile"
-	move_aside_if_symlink "$profile"
-
-	if has_dotfiles_block "$profile"; then
-		echo "  $profile is already set up"
-		return
+	if [ -f "$profile" ] && without_dotfiles_block "$profile" | grep -q '\.bashrc'; then
+		echo "  $profile already loads ~/.bashrc"
+	elif [ ! -f "$profile" ] && [ -f "$HOME/.profile" ] && grep -q '\.bashrc' "$HOME/.profile"; then
+		echo "  ~/.profile already loads ~/.bashrc"
+	else
+		ensure_block "$profile" '[ -f "$HOME/.bashrc" ] && source "$HOME/.bashrc"'
 	fi
-
-	cat >> "$profile" <<EOF
-
-$MARKER_START
-[ -f "\$HOME/.bashrc" ] && source "\$HOME/.bashrc"
-$MARKER_END
-EOF
-	echo "  Added dotfiles block to $profile"
 }
 
 setup_shell() {
 	echo "Shell:"
-	add_shell_block "$HOME/.bashrc" "shell/bashrc.sh"
-	add_bash_profile_block
+	ensure_block "$HOME/.bashrc" "$(shell_block shell/bashrc.sh)"
+	setup_bash_profile
 	if command -v zsh >/dev/null 2>&1 || [ -f "$HOME/.zshrc" ]; then
-		add_shell_block "$HOME/.zshrc" "shell/zshrc.sh"
+		ensure_block "$HOME/.zshrc" "$(shell_block shell/zshrc.sh)"
 	fi
 
 	if [ ! -f "$HOME/.shell_local" ]; then
@@ -107,6 +126,21 @@ setup_git() {
 	include_path="$(native_path "$DOTFILES/git/gitconfig")"
 	move_aside_if_symlink "$gitconfig"
 
+	# Remove includes of a dotfiles gitconfig that no longer exists (e.g. the repo moved).
+	# Git silently ignores missing include files, so these would otherwise go unnoticed.
+	local old_path
+	while IFS= read -r old_path; do
+		case "$old_path" in
+			"$include_path") ;;
+			*/git/gitconfig)
+				if [ ! -f "$old_path" ]; then
+					git config --global --fixed-value --unset include.path "$old_path"
+					echo "  Removed include of $old_path (file no longer exists)"
+				fi
+				;;
+		esac
+	done < <(git config --global --get-all include.path 2>/dev/null)
+
 	if git config --global --get-all include.path 2>/dev/null | grep -qxF "$include_path"; then
 		echo "  $gitconfig already includes the shared config"
 	else
@@ -123,9 +157,12 @@ setup_git() {
 		echo "  Added include for the shared config to the top of $gitconfig"
 	fi
 
-	if ! git config --global --get core.excludesfile >/dev/null 2>&1; then
+	# Point core.excludesfile at the repo's gitignore_global, unless it's set to another file that exists
+	local excludes
+	excludes="$(git config --global --get core.excludesfile 2>/dev/null || true)"
+	if [ -z "$excludes" ] || { [ ! -f "${excludes/#\~/$HOME}" ] && [ "$excludes" != "$(native_path "$DOTFILES/git/gitignore_global")" ]; }; then
 		git config --global core.excludesfile "$(native_path "$DOTFILES/git/gitignore_global")"
-		echo "  Set core.excludesfile to the repo's gitignore_global"
+		echo "  Set core.excludesfile to the repo's gitignore_global${excludes:+, replacing the missing $excludes}"
 	fi
 
 	if ! git config --global --get user.email >/dev/null 2>&1; then
@@ -144,8 +181,10 @@ setup_git() {
 setup_iterm() {
 	[ "$(uname -s)" = Darwin ] && [ -d "/Applications/iTerm.app" ] || return 0
 	echo "iTerm:"
-	if [ "$(defaults read com.googlecode.iterm2 LoadPrefsFromCustomFolder 2>/dev/null)" = 1 ]; then
-		echo "  iTerm already loads settings from $(defaults read com.googlecode.iterm2 PrefsCustomFolder)"
+	local current_folder
+	current_folder="$(defaults read com.googlecode.iterm2 PrefsCustomFolder 2>/dev/null || true)"
+	if [ "$(defaults read com.googlecode.iterm2 LoadPrefsFromCustomFolder 2>/dev/null)" = 1 ] && [ -d "$current_folder" ]; then
+		echo "  iTerm already loads settings from $current_folder"
 		return
 	fi
 	defaults write com.googlecode.iterm2 PrefsCustomFolder -string "$DOTFILES/config/iterm"
@@ -239,9 +278,45 @@ EOF
 	fi
 }
 
+#   -------------------------------
+#   CHECK
+#   -------------------------------
+
+# Starts each shell the way a new terminal would and checks it loaded this repo
+verify_setup() {
+	echo "Check:"
+	local problems=0 shell result
+	for shell in bash zsh; do
+		[ "$shell" = zsh ] && { command -v zsh >/dev/null 2>&1 || continue; }
+		result="$(DOTFILES_WELCOME=false "$shell" -ic 'typeset -f showa >/dev/null && echo "LOADED:$DOTFILES"' </dev/null 2>/dev/null | tail -n 1)"
+		if [ "$result" = "LOADED:$DOTFILES" ]; then
+			echo "  OK: new $shell shells load the dotfiles from $DOTFILES"
+		else
+			echo "  PROBLEM: a new $shell shell didn't load the dotfiles (got: ${result:-nothing})"
+			problems=$((problems + 1))
+		fi
+	done
+
+	if git config --get-all include.path | grep -qxF "$(native_path "$DOTFILES/git/gitconfig")" &&
+		[ "$(git config --get alias.aliases | head -c 1)" = '!' ]; then
+		echo "  OK: git loads the shared config"
+	else
+		echo "  PROBLEM: git isn't loading $DOTFILES/git/gitconfig"
+		problems=$((problems + 1))
+	fi
+	return $problems
+}
+
 setup_shell
 setup_git
 setup_iterm
 setup_repo_hooks
 echo
-echo "Done. Open a new terminal to load the changes."
+if verify_setup; then
+	echo
+	echo "Done. Open a new terminal to load the changes."
+else
+	echo
+	echo "Finished with problems - see above."
+	exit 1
+fi
