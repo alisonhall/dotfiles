@@ -6,7 +6,6 @@
 
 path_add /usr/local/bin
 path_add /usr/local/sbin
-path_add /opt/homebrew/bin
 path_add /usr/local/share/npm/bin
 path_add "/Applications/Visual Studio Code.app/Contents/Resources/app/bin"  # VS Code (code)
 path_add "/Library/Application Support/GoodSync"

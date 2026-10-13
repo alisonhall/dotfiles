@@ -39,6 +39,15 @@ path_add () {
 	fi
 }
 
+# Homebrew, first so the tool setup below finds what it installed (bash doesn't read ~/.zprofile,
+# where the Homebrew installer puts this). Skipped if already done, so reloading doesn't duplicate PATH.
+if [ -z "${HOMEBREW_PREFIX:-}" ]; then
+	for brew_bin in /opt/homebrew/bin/brew /usr/local/bin/brew /home/linuxbrew/.linuxbrew/bin/brew; do  # path-check: ignore (Homebrew's fixed Linux location)
+		[ -x "$brew_bin" ] && eval "$("$brew_bin" shellenv)" && break
+	done
+	unset brew_bin
+fi
+
 path_add "$HOME/.local/bin" --prepend           # Per-user installs (e.g. gitleaks from install.sh)
 path_add "$DOTFILES/bin" --prepend              # Scripts in this repo
 path_add "$HOME/.console-ninja/.bin" --prepend  # Console Ninja (VS Code extension)

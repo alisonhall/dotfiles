@@ -83,6 +83,16 @@ without_dotfiles_block() {
 		!skip' "$1"
 }
 
+# markers_paired <file>: Whether every start marker has a matching end marker (no missing, nested
+# or stray ones). Rewriting a file with a broken block could delete everything after the start marker.
+markers_paired() {
+	awk -v start="$MARKER_START" -v end="$MARKER_END" '
+		$0 == start { if (inside) { bad = 1; exit } inside = 1 }
+		$0 == end { if (!inside) { bad = 1; exit } inside = 0 }
+		END { exit bad || inside }
+	' "$1"
+}
+
 # Prints what's between the dotfiles block markers in a file
 block_contents() {
 	awk -v start="$MARKER_START" -v end="$MARKER_END" '
@@ -104,9 +114,14 @@ ensure_block() {
 		return
 	fi
 
-	if ! grep -qxF "$MARKER_END" "$file"; then
-		problem "$file has a '$MARKER_START' line but no '$MARKER_END' line."
+	if ! markers_paired "$file"; then
+		problem "$file has a '$MARKER_START' line without a matching '$MARKER_END' line (or the other way round)."
 		detail "Fix or delete the block by hand, then run install.sh again."
+		return
+	fi
+	if [ "$(grep -cxF "$MARKER_START" "$file")" -gt 1 ]; then
+		problem "$file has more than one dotfiles block, so the dotfiles would load more than once."
+		detail "Delete all but one of them by hand, then run install.sh again."
 		return
 	fi
 
@@ -282,6 +297,40 @@ git_unset_include() {
 	fi
 }
 
+# shared_include_first <gitconfig> <include path>: Whether the include is the file's first setting
+# (git lists settings in file order)
+shared_include_first() {
+	[ "$(git config --file "$1" --list 2>/dev/null | head -n 1)" = "include.path=$2" ]
+}
+
+# prepend_shared_include <gitconfig> <include path> [--move]: Back up the file, then put the include
+# at the top. With --move, removes the existing include first.
+prepend_shared_include() {
+	local gitconfig="$1" include_path="$2"
+	if [ -s "$gitconfig" ]; then
+		cp "$gitconfig" "$gitconfig.bak.$TIMESTAMP"
+		echo "  Backed up $gitconfig to $gitconfig.bak.$TIMESTAMP"
+	fi
+	if [ "${3:-}" = --move ]; then
+		git_unset_include "$include_path"
+		# Drop the old comment, and the [include] header if unsetting left it empty
+		grep -vxF '# Shared config from the dotfiles repo. Settings below this override it.' "$gitconfig" |
+			awk '
+				pending && /^[[:space:]]*$/ { held = held "\n" $0; next }
+				pending { pending = 0; if ($0 !~ /^[[:space:]]*\[/) print held }
+				/^\[include\][[:space:]]*$/ { pending = 1; held = $0; next }
+				{ print }
+			' > "$gitconfig.tmp" || true
+		mv "$gitconfig.tmp" "$gitconfig"
+	fi
+	{
+		printf '# Shared config from the dotfiles repo. Settings below this override it.\n'
+		printf '[include]\n\tpath = %s\n' "$include_path"
+		[ -f "$gitconfig" ] && cat "$gitconfig"
+	} > "$gitconfig.tmp"
+	mv "$gitconfig.tmp" "$gitconfig"
+}
+
 # ~/.gitconfig includes the shared config from this repo at the top, so anything
 # set below it (user.name, user.email, machine-specific paths) overrides it.
 setup_git() {
@@ -310,20 +359,15 @@ setup_git() {
 		esac
 	done < <(git config --global --get-all include.path 2>/dev/null)
 
-	if git config --global --get-all include.path 2>/dev/null | grep -qxF "$include_path"; then
-		echo "  $gitconfig already includes the shared config"
-	else
-		if [ -s "$gitconfig" ]; then
-			cp "$gitconfig" "$gitconfig.bak.$TIMESTAMP"
-			echo "  Backed up $gitconfig to $gitconfig.bak.$TIMESTAMP"
-		fi
-		{
-			printf '# Shared config from the dotfiles repo. Settings below this override it.\n'
-			printf '[include]\n\tpath = %s\n' "$include_path"
-			[ -f "$gitconfig" ] && cat "$gitconfig"
-		} > "$gitconfig.tmp"
-		mv "$gitconfig.tmp" "$gitconfig"
+	if ! git config --global --get-all include.path 2>/dev/null | grep -qxF "$include_path"; then
+		prepend_shared_include "$gitconfig" "$include_path"
 		echo "  Added include for the shared config to the top of $gitconfig"
+	elif ! shared_include_first "$gitconfig" "$include_path"; then
+		# Settings above the include would be overridden by the shared config
+		prepend_shared_include "$gitconfig" "$include_path" --move
+		echo "  Moved the include for the shared config back to the top of $gitconfig, so the settings below it override it"
+	else
+		echo "  $gitconfig already includes the shared config"
 	fi
 
 	# Point core.excludesfile at the repo's gitignore_global, unless it's set to another file that exists
@@ -510,9 +554,19 @@ check_startup_files() {
 	# The block itself should match what this copy of the repo would write (it may point at a
 	# moved or different copy, or be from an older version of install.sh)
 	local expected_file expected
+	for file in "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.zshrc"; do
+		[ -f "$file" ] && grep -qxF "$MARKER_START" "$file" || continue
+		# install mode has already reported these (ensure_block)
+		if ! markers_paired "$file"; then
+			[ "$MODE" = check ] && problem "$file has a '$MARKER_START' line without a matching '$MARKER_END' line (or the other way round) - fix it by hand"
+		elif [ "$(grep -cxF "$MARKER_START" "$file")" -gt 1 ]; then
+			[ "$MODE" = check ] && problem "$file has more than one dotfiles block, so the dotfiles load more than once - delete all but one"
+		fi
+	done
 	for expected_file in "$HOME/.bashrc:shell/bashrc.sh" "$HOME/.zshrc:shell/zshrc.sh"; do
 		file="${expected_file%%:*}"
 		[ -f "$file" ] && grep -qxF "$MARKER_START" "$file" || continue
+		markers_paired "$file" && [ "$(grep -cxF "$MARKER_START" "$file")" -eq 1 ] || continue
 		expected="$(shell_block "${expected_file#*:}")"
 		if [ "$(block_contents "$file")" != "$expected" ]; then
 			warning "the dotfiles block in $file is out of date or points at another copy of the repo - run ./install.sh"
@@ -545,10 +599,15 @@ check_startup_files() {
 # (user.name etc.), but overriding shared ones usually means an old copy of the config.
 check_gitconfig() {
 	echo "Git config:"
-	local gitconfig="$HOME/.gitconfig" overlap count
+	local gitconfig="$HOME/.gitconfig" overlap count include_path
 	if [ ! -f "$gitconfig" ]; then
 		problem "$gitconfig doesn't exist - run ./install.sh"
 		return
+	fi
+	include_path="$(native_path "$DOTFILES/git/gitconfig")"
+	if git config --file "$gitconfig" --get-all include.path 2>/dev/null | grep -qxF "$include_path" &&
+		! shared_include_first "$gitconfig" "$include_path"; then
+		warning "the include for the shared config isn't at the top of $gitconfig, so it overrides the settings above it - run ./install.sh"
 	fi
 	# Settings both files have, minus the ones with identical values (harmless - e.g. `git lfs install` adds
 	# the same [filter "lfs"] settings the shared config has)
@@ -654,36 +713,43 @@ check_new_shells() {
 #   MAIN
 #   -------------------------------
 
-preflight
-if [ "$PROBLEMS" -gt 0 ]; then
+main() {
+	preflight
+	if [ "$PROBLEMS" -gt 0 ]; then
+		echo
+		echo "Stopped before changing anything - fix the problems above, then run install.sh again."
+		exit 1
+	fi
+
+	if [ "$MODE" = install ]; then
+		setup_shell
+		setup_git
+		setup_iterm
+		setup_repo_hooks
+	fi
+
 	echo
-	echo "Stopped before changing anything - fix the problems above, then run install.sh again."
-	exit 1
-fi
+	check_startup_files
+	check_gitconfig
+	check_new_shells
+	check_reminders
 
-if [ "$MODE" = install ]; then
-	setup_shell
-	setup_git
-	setup_iterm
-	setup_repo_hooks
-fi
+	echo
+	if [ "$PROBLEMS" -gt 0 ]; then
+		echo "Finished with $PROBLEMS problem(s) and $WARNINGS warning(s) - see above."
+		exit 1
+	elif [ "$MODE" = check ] && [ "$WARNINGS" -gt 0 ]; then
+		echo "Checks finished with $WARNINGS warning(s) - see above."
+	elif [ "$MODE" = check ]; then
+		echo "All checks passed."
+	elif [ "$WARNINGS" -gt 0 ]; then
+		echo "Done, with $WARNINGS warning(s) - see above. Open a new terminal to load the changes."
+	else
+		echo "Done. Open a new terminal to load the changes."
+	fi
+}
 
-echo
-check_startup_files
-check_gitconfig
-check_new_shells
-check_reminders
-
-echo
-if [ "$PROBLEMS" -gt 0 ]; then
-	echo "Finished with $PROBLEMS problem(s) and $WARNINGS warning(s) - see above."
-	exit 1
-elif [ "$MODE" = check ] && [ "$WARNINGS" -gt 0 ]; then
-	echo "Checks finished with $WARNINGS warning(s) - see above."
-elif [ "$MODE" = check ]; then
-	echo "All checks passed."
-elif [ "$WARNINGS" -gt 0 ]; then
-	echo "Done, with $WARNINGS warning(s) - see above. Open a new terminal to load the changes."
-else
-	echo "Done. Open a new terminal to load the changes."
+# Only run when executed - tests source this file to call its functions
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+	main
 fi

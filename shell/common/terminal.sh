@@ -31,6 +31,16 @@ alias finda='alias | grep'                  # finda:        Find an alias by par
 alias h='history'                           # h:            Show command history
 alias j='jobs -l'                           # j:            List background jobs
 mcd () { mkdir -p "$1" && cd "$1"; }        # mcd:          Makes new Dir and jumps inside
+
+#   select-folder:  Pick one of the folders here from a numbered list and cd into it
+#   ------------------------------------------------------------
+select-folder () {
+	local d
+	printf "Please select folder:\n"
+	select d in */; do [ -n "$d" ] && break; echo ">>> Invalid Selection"; done
+	[ -n "$d" ] && cd "$d" && pwd
+}
+
 alias DT='tee ~/Desktop/terminalOut.txt'    # DT:           Pipe content to file on the Desktop
 
 #   lr:  Full Recursive Directory Listing

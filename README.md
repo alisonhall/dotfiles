@@ -32,8 +32,8 @@ Both report `PROBLEM`s (something is broken; exits with an error), `WARNING`s (l
 
 The installer doesn't replace your existing config files. It:
 
-- adds a small block to `~/.bashrc`, `~/.bash_profile` and `~/.zshrc` that loads `shell/` from this repo, creating the files if needed. If the block is already there but out of date (e.g. you moved the repo), it's updated in place. `~/.bash_profile` is skipped if it, or `~/.profile` on Linux, already loads `~/.bashrc`
-- adds an include for `git/gitconfig` to the top of `~/.gitconfig` and backs up the original first, removing includes of a dotfiles gitconfig that no longer exists
+- adds a small block to `~/.bashrc`, `~/.bash_profile` and `~/.zshrc` that loads `shell/` from this repo, creating the files if needed. If the block is already there but out of date (e.g. you moved the repo), it's updated in place. If a file has two blocks, or a block with a missing marker line, it stops and asks you to fix it by hand rather than risk deleting your own lines. `~/.bash_profile` is skipped if it, or `~/.profile` on Linux, already loads `~/.bashrc`
+- adds an include for `git/gitconfig` to the top of `~/.gitconfig` and backs up the original first, removing includes of a dotfiles gitconfig that no longer exists. If the include has been moved further down (where it would override your settings above it), it's moved back to the top
 - creates `~/.shell_local` from [local.example.sh](local.example.sh)
 - on macOS, points iTerm at `config/iterm` for its settings
 - installs gitleaks if it's missing (see [Committing](#committing))
@@ -57,7 +57,7 @@ Put anything personal, work-specific or specific to one computer in the local fi
 | File | Contents |
 | --- | --- |
 | `shell/bashrc.sh`, `shell/zshrc.sh` | Shell-specific setup (oh-my-zsh, prompt, completion); each loads `common.sh` |
-| `shell/common.sh` | Environment, `PATH`, tool setup (nvm/fnm, jenv, pyenv, rbenv, z) |
+| `shell/common.sh` | Environment, `PATH`, tool setup (Homebrew, nvm/fnm, jenv, pyenv, rbenv, z) |
 | `shell/common/*.sh` | Aliases and functions for both shells: terminal, system, dev, git |
 | `shell/os/mac.sh`, `shell/os/linux.sh`, `shell/os/windows.sh` | OS-specific versions, loaded last on that OS only |
 

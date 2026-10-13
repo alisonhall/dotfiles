@@ -9,6 +9,9 @@
 # It's loaded last, so it can override anything from the repo.
 # Tools that set themselves up (e.g. `conda init`) write to ~/.zshrc / ~/.bashrc instead,
 # which is fine - those files aren't in the repo either.
+#
+# Other setup scripts (e.g. for a private dotfiles repo) may add a marked block at the top of
+# this file. Leave it in place - settings below it override what it loads.
 
 #   -------------------------------
 #   Values used by the shared files
