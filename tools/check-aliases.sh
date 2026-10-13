@@ -238,7 +238,11 @@ shell_scan="$os_knowledge"'
 	}
 '
 
-shell_output="$(awk "$shell_scan" "${shell_files[@]}")"
+# (Skipped with no files: awk would wait for input on stdin instead)
+shell_output=""
+if [ ${#shell_files[@]} -gt 0 ]; then
+	shell_output="$(awk "$shell_scan" "${shell_files[@]}")"
+fi
 
 # 1 and 2: try the alias bodies and names in each shell that loads them. All at once first,
 # since starting a shell per alias is slow (especially on Windows); one at a time only to
@@ -321,9 +325,11 @@ report "Options that only work on some OSes' versions of a tool:" \
 gitconfig=git/gitconfig
 if [ -f "$gitconfig" ] && command -v git >/dev/null 2>&1; then
 	# name<TAB>value per alias (values can span lines in the file, so read git's NUL-separated
-	# output; tabs from their indentation become spaces so they don't split the fields)
-	git config --file "$gitconfig" -z --get-regexp '^alias\.' |
-		awk 'BEGIN { RS = "\0" } { key = $0; sub(/\n.*/, "", key); value = substr($0, length(key) + 2); sub(/^alias\./, "", key); gsub(/[\n\t]/, " ", value); print key "\t" value }' \
+	# output; tabs from their indentation become spaces so they don't split the fields).
+	# tr turns each alias into one line first (newlines -> \036, NULs -> newlines): macOS awk
+	# can't split records on NUL, and would only see the first alias.
+	git config --file "$gitconfig" -z --get-regexp '^alias\.' | tr '\n\0' '\036\n' |
+		awk '{ key = $0; sub(/\036.*/, "", key); value = substr($0, length(key) + 2); sub(/^alias\./, "", key); gsub(/[\036\t]/, " ", value); print key "\t" value }' \
 			> "$work_dir/git-aliases"
 
 	# Aliases whose line in the file is marked to skip

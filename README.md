@@ -104,3 +104,26 @@ Everything in `bin/` is on your `PATH`.
   - git aliases git can't run (`git ...` inside an alias, built-in names, loops), and `!` aliases with syntax errors or bash-only syntax (git runs them with `sh`, which is `dash` on Ubuntu and WSL)
 
   To allow a line on purpose, add a comment containing `alias-check: ignore`.
+
+## Tests
+
+Tests live in `__test__` folders next to the code they test (e.g. `__test__/install.bats` tests `install.sh`), and use [bats-core](https://github.com/bats-core/bats-core). Run them all with:
+
+```sh
+tools/run-tests.sh                      # or: tools/run-tests.sh --filter setup_git
+```
+
+What's tested:
+
+| Folder | Tests |
+| --- | --- |
+| `__test__/` | `install.sh`: the shell blocks it manages, and the order of `~/.gitconfig` |
+| `tools/__test__/` | Each `check-*.sh` flags a bad example and passes a good one, in a throwaway git repo |
+| `shell/__test__/` | `path_add` and the Homebrew setup in `shell/common.sh` |
+| `shell/common/__test__/` | `git_dev_branch`, which `dev`, `sprint`, `gmerge-dev` and others use |
+
+Install bats with `brew install bats-core` (macOS), `sudo apt install bats` (Linux) or `npm install -g bats` (Git Bash). CI runs the tests on macOS (including its built-in bash 3.2), Linux and Windows. The commit hook doesn't, so commits stay fast and work without bats.
+
+When writing tests, end every `[[ ... ]]` check with `|| false`, and check that something fails with `run ! command` rather than `! command`. macOS's bash 3.2 doesn't fail a test on a false `[[ ]]` unless it's the last line, and no bash fails one on `! command`, so those checks would silently pass.
+
+Each test uses its own empty fake home folder, so running them never touches your real config. `install.sh` only runs when it's executed, so tests can `source` it to call its functions one at a time.

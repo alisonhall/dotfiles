@@ -50,7 +50,6 @@ fi
 
 path_add "$HOME/.local/bin" --prepend           # Per-user installs (e.g. gitleaks from install.sh)
 path_add "$DOTFILES/bin" --prepend              # Scripts in this repo
-path_add "$HOME/.console-ninja/.bin" --prepend  # Console Ninja (VS Code extension)
 path_add "$HOME/.jenv/bin"                      # Java jenv
 path_add "$HOME/.pyenv/bin"                     # Python pyenv
 

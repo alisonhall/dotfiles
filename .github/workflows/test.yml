@@ -65,6 +65,21 @@ jobs:
           bash tools/check-portability.sh
           bash tools/check-aliases.sh
 
+      - name: Install bats
+        run: |
+          case "$RUNNER_OS" in
+            Linux) sudo apt-get install -y -q bats ;;
+            macOS) brew install bats-core ;;
+            Windows) npm install -g bats ;;
+          esac
+
+      - name: Unit tests (__test__ folders)
+        run: bash tools/run-tests.sh
+
+      - name: Works with macOS's built-in bash 3.2 (unit tests)
+        if: runner.os == 'macOS'
+        run: PATH="/bin:$PATH" /bin/bash tools/run-tests.sh
+
       - name: First install
         run: ./install.sh
 
