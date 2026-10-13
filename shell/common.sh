@@ -50,8 +50,9 @@ fi
 
 path_add "$HOME/.local/bin" --prepend           # Per-user installs (e.g. gitleaks from install.sh)
 path_add "$DOTFILES/bin" --prepend              # Scripts in this repo
-path_add "$HOME/.jenv/bin"                      # Java jenv
-path_add "$HOME/.pyenv/bin"                     # Python pyenv
+
+# Tools used by one person or one machine go in the private repo or ~/.shell_local, not here
+# (see local.example.sh)
 
 #   -------------------------------
 #   TOOLS
@@ -66,6 +67,10 @@ elif command -v fnm >/dev/null 2>&1; then
 fi
 
 command -v rbenv >/dev/null 2>&1 && eval "$(rbenv init -)"
+
+# jenv and pyenv installed with git (rather than Homebrew) live in these folders
+path_add "$HOME/.jenv/bin"
+path_add "$HOME/.pyenv/bin"
 command -v jenv >/dev/null 2>&1 && eval "$(jenv init -)"
 command -v pyenv >/dev/null 2>&1 && eval "$(pyenv init -)"
 command -v yarn >/dev/null 2>&1 && path_add "$(yarn global bin 2>/dev/null)"

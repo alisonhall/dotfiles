@@ -4,12 +4,9 @@
 #   PATH
 #   -------------------------------
 
-path_add /usr/local/bin
-path_add /usr/local/sbin
-path_add /usr/local/share/npm/bin
-path_add "/Applications/Visual Studio Code.app/Contents/Resources/app/bin"  # VS Code (code)
-path_add "/Library/Application Support/GoodSync"
-path_add "$HOME/phantomjs-2.1.1-macosx/bin"
+# VS Code's `code` command, which vscode, open-dotfiles and open-local use.
+# (/usr/local/bin is already on macOS's PATH, from /etc/paths, and Homebrew adds its own folders.)
+path_add "/Applications/Visual Studio Code.app/Contents/Resources/app/bin"
 
 alias java-jdk-versions-installed='/usr/libexec/java_home -V'
 alias java-jdk-current='echo $JAVA_HOME'

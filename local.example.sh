@@ -32,3 +32,6 @@
 
 # alias ssh-myserver='ssh user@host'
 # path_add "/some/tool/bin"               # Add a folder to PATH (only if it exists)
+#   PATH folders for tools: the shared repo only adds standard ones (~/.local/bin, Homebrew,
+#   VS Code's `code`). A tool only this machine has goes here; one you use on all your
+#   machines goes in your own private repo, if you have one.
