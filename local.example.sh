@@ -19,7 +19,6 @@
 
 # export NAME="Your Name"                 # Shown in the welcome message (default: your username)
 # export EMAIL="you@example.com"          # Shown in the welcome message, default for create-ssh-key
-# export COMPUTER_TYPE="Work computer"    # Shown by print-workspace-variables
 # export SITES_DIR="$HOME/Sites"          # Where goto-sites goes
 # export CURRENT_REMOTE_NAME=origin       # Remote used by the git shortcuts
 # export CURRENT_DEV_BRANCH=main          # Branch dev/sprint/gmerge-dev use (default: the remote's default branch)

@@ -108,7 +108,7 @@ print-workspace-variables () {
 	printf ' %s: %s\n' \
 		NAME "$NAME" \
 		EMAIL "${EMAIL:-}" \
-		COMPUTER_TYPE "${COMPUTER_TYPE:-}" \
+		DOTFILES_PROFILE "${DOTFILES_PROFILE:-}" \
 		DOTFILES "$DOTFILES" \
 		DOTFILES_OS "$DOTFILES_OS" \
 		SITES_DIR "$SITES_DIR" \
