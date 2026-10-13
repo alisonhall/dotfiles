@@ -182,9 +182,12 @@ checksum() { cksum < "$1"; }
 }
 
 @test "setup_git: removes the include of a dotfiles gitconfig that no longer exists" {
-	printf '[include]\n\tpath = %s\n' "$BATS_TEST_TMPDIR/gone/git/gitconfig" > "$HOME/.gitconfig"
+	# Written the way install.sh writes paths (C:/... on Windows - Git Bash would convert a /tmp/...
+	# path when passing it to git, so it wouldn't match)
+	gone="$(native "$BATS_TEST_TMPDIR/gone/git/gitconfig")"
+	printf '[include]\n\tpath = %s\n' "$gone" > "$HOME/.gitconfig"
 	call setup_git
-	[[ "$output" == *"Removed include of $BATS_TEST_TMPDIR/gone/git/gitconfig"* ]] || false
+	[[ "$output" == *"Removed include of $gone"* ]] || false
 	[ "$(git config --file "$HOME/.gitconfig" --get-all include.path)" = "$SHARED_INCLUDE" ]
 }
 

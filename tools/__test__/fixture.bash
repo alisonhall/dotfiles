@@ -34,7 +34,8 @@ add_executable() {
 add_index_only() {
 	local blob
 	blob="$(git -C "$FIX" hash-object -w --stdin </dev/null)"
-	git -C "$FIX" update-index --add --cacheinfo "${2:-100644},$blob,$1"
+	# Git for Windows refuses names like these by default (core.protectNTFS), even in the index
+	git -C "$FIX" -c core.protectNTFS=false update-index --add --cacheinfo "${2:-100644},$blob,$1"
 }
 
 # check <name>: Run tools/check-<name>.sh in the fixture repo (with no input, so anything that
