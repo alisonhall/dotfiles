@@ -73,7 +73,7 @@ These live in `git/` rather than `bin/` because you run them through a git alias
 | File | Contents |
 | --- | --- |
 | `git/branch-report.sh` | Richer branch status report: remote/PR state (via `gh`), worktree awareness, and squash-merge-aware "in base" detection. Run it with `git branch-report` (`git branch-status` runs `bin/git-branch-status`) |
-| `git/wt/` | A git worktree manager, run as `wt` (see `wt help` once a shell has loaded this repo). Configure it per-repo with a `WT_*`-exporting alias in `~/.shell_local` (`wt help` documents the variables) |
+| `git/wt/` | A git worktree manager, run as `wt`. Configure it per-repo with a `WT_*`-exporting alias in `~/.shell_local`. See [git/wt/README.md](git/wt/README.md), which also covers installing it on its own |
 
 ### VS Code
 
