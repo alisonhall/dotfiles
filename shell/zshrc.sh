@@ -12,9 +12,21 @@ if [ -d "$ZSH" ]; then
 	ZSH_THEME=""                # The prompt comes from powerlevel10k below
 	ENABLE_CORRECTION="true"    # Command auto-correction
 	HIST_STAMPS="mm/dd/yyyy"    # Command execution time stamp shown in the history command output
-	plugins=(git node npm nvm yarn extract sudo bower docker docker-compose)
+	plugins=(git node npm nvm yarn extract sudo bower docker docker-compose mvn python)
 	[[ "$OSTYPE" == darwin* ]] && plugins+=(brew macos)
+
 	source "$ZSH/oh-my-zsh.sh"
+
+	# Extra completions (e.g. Homebrew-installed zsh-completions) and a fix for
+	# compinit's "insecure directories" warning. Run after oh-my-zsh.sh (which
+	# autoloads compaudit as part of its own compinit setup), then re-run
+	# compinit so it picks up the extra $FPATH entry.
+	if type brew &>/dev/null; then
+		FPATH="$(brew --prefix)/share/zsh-completions:$FPATH"
+		compaudit | xargs chmod g-w
+		autoload -Uz compinit
+		compinit
+	fi
 fi
 
 source "$DOTFILES/shell/common.sh"
