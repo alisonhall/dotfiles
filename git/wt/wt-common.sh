@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # wt-common.sh — shared helpers for the wt-*.sh scripts.
-# Sourced (not executed) by wt-add.sh and wt-cd.sh.
+# Sourced (not executed) by wt-add.sh, wt-cd.sh, wt-clean.sh, wt-link.sh and wt-rm.sh.
 #
 # These helpers read globals set by the calling script before they are invoked:
 #   WT_WORKTREE_REPO_LOCATION, CURRENT_REMOTE_NAME, REMOTE_BRANCH_NAME,
@@ -37,6 +37,17 @@ fetch_pr_head() {
 		return 0
 	fi
 	return 1
+}
+
+# remove_links <folder>: Delete the links (symlinks, and junctions on Windows) inside a
+# worktree folder, leaving what they point at alone. Run it before deleting the folder: on
+# Windows, `git worktree remove` follows junctions and deletes everything inside the folders
+# they point to, such as main/node_modules. (rm -r doesn't, but this protects either way.)
+remove_links() {
+	local link
+	while IFS= read -r link; do
+		rm -f "$link"
+	done < <(find "$1" -name .git -prune -o -type l -print 2>/dev/null)
 }
 
 # Re-point the @scope/* workspace packages to THIS worktree's source (the root
