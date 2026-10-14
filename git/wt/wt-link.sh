@@ -138,11 +138,12 @@ process_worktree() {
 			continue
 		fi
 
-		if [ -L "$p" ]; then
-			actual="$(readlink "$p")"
-			if [ "$actual" = "$expected" ]; then
-				state="ok"
-			elif [ -e "$p" ]; then
+		# -ef: the same file or folder as main's, through a symlink, a Windows junction or a
+		# Windows hard link (see make_link in wt-common.sh)
+		if [ "$p" -ef "$expected" ]; then
+			state="ok"
+		elif [ -L "$p" ]; then
+			if [ -e "$p" ]; then
 				state="wrong"
 			else
 				state="broken"
@@ -160,6 +161,10 @@ process_worktree() {
 				;;
 			real)
 				echo "  $rel:  REAL file/dir (expected symlink) — not touched"
+				if wt_is_windows && [ -f "$p" ]; then
+					# A hard link stops being shared when an editor saves by replacing the file
+					echo "         (if it's an old copy of main's, delete it and run wt link again)"
+				fi
 				problem=$((problem+1))
 				;;
 			missing|broken|wrong)
@@ -171,7 +176,7 @@ process_worktree() {
 					# file/dir), ensure the parent dir exists, and re-link.
 					[ -L "$p" ] && rm "$p"
 					mkdir -p "$(dirname "$p")"
-					if ln -s "$expected" "$p"; then
+					if make_link "$expected" "$p"; then
 						echo "  $rel:  $state -> fixed (now -> $expected)"
 						ok=$((ok+1))
 					else

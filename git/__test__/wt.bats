@@ -26,7 +26,8 @@ setup() {
 	mkdir -p "$MAIN/node_modules/pkg"
 	echo 'module.exports = 42' > "$MAIN/node_modules/pkg/index.js"
 
-	# A gh that's logged in, and says every branch's pull request was merged at its current commit
+	# A gh that's logged in, and says every existing branch's pull request was merged at its
+	# current commit (a branch that doesn't exist yet has no pull request)
 	mkdir -p "$BATS_TEST_TMPDIR/bin"
 	cat > "$BATS_TEST_TMPDIR/bin/gh" <<-'EOF'
 		#!/usr/bin/env bash
@@ -34,7 +35,8 @@ setup() {
 			"auth status") exit 0 ;;
 			"pr list")
 				while [ $# -gt 0 ]; do [ "$1" = --head ] && head="$2"; shift; done
-				printf '1\tMERGED\t%s\n' "$(git -C "$WT_WORKTREE_REPO_LOCATION/main" rev-parse "refs/heads/$head")"
+				oid="$(git -C "$WT_WORKTREE_REPO_LOCATION/main" rev-parse --verify --quiet "refs/heads/$head")" &&
+					printf '1\tMERGED\t%s\n' "$oid"
 				;;
 			*) exit 1 ;;
 		esac
@@ -52,7 +54,7 @@ is_windows() {
 # a symlink elsewhere
 link_dir() {
 	if is_windows; then
-		cmd //c "mklink /J $(cygpath -w "$2") $(cygpath -w "$1")" >/dev/null
+		MSYS2_ARG_CONV_EXCL="*" cmd /c mklink /J "$(cygpath -w "$2")" "$(cygpath -w "$1")" >/dev/null
 	else
 		ln -s "$1" "$2"
 	fi
@@ -66,6 +68,82 @@ merged_branch() {
 	git -C "$folder" push -q -u origin "$1" 2>/dev/null
 	link_dir "$MAIN/node_modules" "$folder/node_modules"
 	[ -f "$folder/node_modules/pkg/index.js" ]
+}
+
+#   -------------------------------
+#   SHARING FILES WITH MAIN
+#   -------------------------------
+
+@test "wt add shares node_modules and WT_SYMLINK_PAIRS with main, by linking rather than copying" {
+	echo SECRET=1 > "$MAIN/.env"
+	export WT_SYMLINK_PAIRS=.env
+	run bash "$WT/wt.sh" add feature/new
+	[ "$status" -eq 0 ]
+	folder="$WT_WORKTREE_REPO_LOCATION/feature_new"
+	# -ef: the same folder or file, not a copy
+	[ "$folder/node_modules" -ef "$MAIN/node_modules" ]
+	[ "$folder/.env" -ef "$MAIN/.env" ]
+	echo SECRET=2 > "$MAIN/.env"
+	[ "$(cat "$folder/.env")" = SECRET=2 ]
+}
+
+@test "wt add skips a shared file that main doesn't have, rather than linking to nothing" {
+	export WT_SYMLINK_PAIRS=.env
+	run bash "$WT/wt.sh" add feature/new
+	[ "$status" -eq 0 ]
+	[[ "$output" == *".env: skipped, because main/.env doesn't exist"* ]] || false
+	folder="$WT_WORKTREE_REPO_LOCATION/feature_new"
+	[ ! -e "$folder/.env" ] && [ ! -L "$folder/.env" ]
+}
+
+@test "wt link --check passes correct links, and wt link repairs a missing one" {
+	echo SECRET=1 > "$MAIN/.env"
+	export WT_SYMLINK_PAIRS=.env
+	bash "$WT/wt.sh" add feature/new >/dev/null 2>&1
+	run bash "$WT/wt.sh" link --check --no-workspaces feature/new
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"node_modules:  ok"* ]] || false
+	[[ "$output" == *".env:  ok"* ]] || false
+
+	rm "$WT_WORKTREE_REPO_LOCATION/feature_new/.env"
+	run bash "$WT/wt.sh" link --check --no-workspaces feature/new
+	[ "$status" -ne 0 ]
+	[[ "$output" == *".env:  missing"* ]] || false
+	run bash "$WT/wt.sh" link --no-workspaces feature/new
+	[ "$status" -eq 0 ]
+	[ "$WT_WORKTREE_REPO_LOCATION/feature_new/.env" -ef "$MAIN/.env" ]
+}
+
+@test "wt clean counts a shared .env as shared, not as work in the branch folder" {
+	echo SECRET=1 > "$MAIN/.env"
+	export WT_SYMLINK_PAIRS=.env
+	bash "$WT/wt.sh" add feature/done >/dev/null 2>&1
+	folder="$WT_WORKTREE_REPO_LOCATION/feature_done"
+	git -C "$folder" commit -q --allow-empty -m work
+	git -C "$folder" push -q -u origin feature/done 2>/dev/null
+	run bash "$WT/wt.sh" clean --apply
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"GONE"*"feature_done"* ]] || false
+	[ "$(cat "$MAIN/.env")" = SECRET=1 ]
+}
+
+@test "link-workspaces.mjs points a monorepo's own packages at this branch folder's code" {
+	command -v node >/dev/null 2>&1 || skip "Node.js isn't installed"
+	folder="$BATS_TEST_TMPDIR/monorepo"
+	mkdir -p "$folder/packages/ui" "$folder/packages/app"
+	echo '{ "workspaces": ["packages/*"] }' > "$folder/package.json"
+	echo '{ "name": "@acme/ui" }' > "$folder/packages/ui/package.json"
+	echo '{ "name": "@acme/app" }' > "$folder/packages/app/package.json"
+	run node "$WT/link-workspaces.mjs" "$folder" --relative
+	[ "$status" -eq 0 ]
+	[ "$folder/packages/node_modules/@acme/ui" -ef "$folder/packages/ui" ]
+	run node "$WT/link-workspaces.mjs" "$folder" --relative --check
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"ISSUES=0"* ]] || false
+	run node "$WT/link-workspaces.mjs" "$folder" --clean
+	[ "$status" -eq 0 ]
+	[ ! -e "$folder/packages/node_modules/@acme/ui" ]
+	[ -f "$folder/packages/ui/package.json" ]
 }
 
 #   -------------------------------

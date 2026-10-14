@@ -39,6 +39,34 @@ fetch_pr_head() {
 	return 1
 }
 
+# wt_is_windows: Whether this is Git Bash (or another Unix layer) on Windows
+wt_is_windows() {
+	case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) return 0 ;; esac
+	return 1
+}
+
+# make_link <target> <link>: Make <link> share <target>, which must exist. That's a symlink,
+# except on Windows, where Git Bash's ln -s copies instead of linking (unless Developer Mode is
+# on): there a folder gets a junction and a file a hard link, neither of which needs admin
+# rights. A hard link shares the file's contents until an editor saves it by replacing the
+# file; wt link --check reports that.
+make_link() {
+	local target="$1" link="$2"
+	[ -e "$target" ] || return 1
+	if ! wt_is_windows; then
+		ln -s "$target" "$link"
+		return
+	fi
+	# A real symlink, if Windows allows them (Developer Mode); this fails rather than copying
+	MSYS=winsymlinks:nativestrict ln -s "$target" "$link" 2>/dev/null && return 0
+	if [ -d "$target" ]; then
+		# (Separate arguments, without Git Bash converting them, so paths with spaces work)
+		MSYS2_ARG_CONV_EXCL='*' cmd /c mklink /J "$(cygpath -w "$link")" "$(cygpath -w "$target")" >/dev/null
+	else
+		ln "$target" "$link"
+	fi
+}
+
 # remove_links <folder>: Delete the links (symlinks, and junctions on Windows) inside a
 # worktree folder, leaving what they point at alone. Run it before deleting the folder: on
 # Windows, `git worktree remove` follows junctions and deletes everything inside the folders
@@ -91,11 +119,17 @@ worktree_symlink_pairs() {
 # WT_SYMLINK_PAIRS (e.g. .cache, .env) from main, then re-link workspace
 # packages. Run from inside the new worktree folder.
 setup_worktree_symlinks() {
+	local rel main_rel
 	echo "Making symlinks from the main worktree..."
 	# Optionally run npm install or yarn instead of copying the node_modules from the main branch
 	while IFS=$'\t' read -r rel main_rel; do
 		[ -z "$rel" ] && continue
-		ln -s "$WT_WORKTREE_REPO_LOCATION/$main_rel" "$rel"
+		if [ ! -e "$WT_WORKTREE_REPO_LOCATION/$main_rel" ]; then
+			echo "  $rel: skipped, because $main_rel doesn't exist"
+			continue
+		fi
+		mkdir -p "$(dirname "$rel")"
+		make_link "$WT_WORKTREE_REPO_LOCATION/$main_rel" "$rel" || echo "  $rel: couldn't link it to $main_rel"
 	done < <(worktree_symlink_pairs)
 
 	echo "Symlinks pointing to the main worktree folder"

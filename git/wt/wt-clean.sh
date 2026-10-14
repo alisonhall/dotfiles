@@ -274,6 +274,8 @@ worktree_block_reason() {
   while IFS= read -r uf; do
     [[ -z "$uf" ]] && continue
     [[ -L "$wt/$uf" ]] && continue
+    # Shared with main through a Windows hard link (see make_link in wt-common.sh)
+    [[ "$wt/$uf" -ef "$MAIN_WT/$uf" ]] && continue
     is_safe_artifact "$uf" && continue
     bad_untracked+="$uf"$'\n'
     ((bad_count++)) || true

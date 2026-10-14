@@ -286,7 +286,9 @@ Each new branch folder gets a `node_modules` link to `main/node_modules`, so you
 
 `wt link --check --all` shows which branch folders have missing or broken links, and `wt link --all` repairs them. If a branch folder has a real file or folder where a link should be, `wt link` reports it but leaves it alone, since it may hold work you want to keep.
 
-In a repo with no `main/node_modules`, the `node_modules` link points at nothing. That's harmless. On Windows, `ln` prints an error instead.
+If `main` doesn't have one of these (a repo with no `node_modules`, say), `wt add` skips that link.
+
+On Windows, these links are made differently. See [Windows](#windows).
 
 ### Node projects
 
@@ -294,11 +296,12 @@ In a JavaScript monorepo with npm or yarn `workspaces`, the shared `node_modules
 
 ## Windows
 
-`wt` runs in Git Bash, with these limits:
+`wt` runs in Git Bash. Some things work differently there:
 
-- **Shared links:** Git Bash's `ln -s` copies a folder instead of linking to it, so each branch folder gets its own copy of `node_modules`. To get real links, turn on Windows Developer Mode and add `export MSYS=winsymlinks:nativestrict` to `~/.bashrc`.
+- **Shared links:** Windows only allows ordinary symlinks with Developer Mode turned on, and Git Bash copies files instead of linking them otherwise. So without Developer Mode, `wt` shares folders (like `node_modules`) through *junctions*, and files (like `.env`) through *hard links*. Neither needs admin rights. A hard link stops being shared if an editor saves the file by replacing it; `wt link --check` reports that, and you can delete the branch folder's copy and run `wt link` again. With Developer Mode on, `wt` makes ordinary symlinks.
+- **Deleting branch folders yourself:** on Windows, `git worktree remove` follows junctions and **deletes everything inside the folders they point to**, like `main/node_modules`. `wt rm` and `wt clean` delete a folder's links first, so use them. If you use `git worktree remove` directly, delete the folder's links first: `find <folder> -type l -delete`.
 - **`wt ls`** marks every folder `[outside]`, because Git Bash writes the same folder in two forms (like `/c/Users/...` and `C:/Users/...`). The rest of its report is right.
 
 ## Uninstall
 
-Remove the lines you added to `~/.zshrc` or `~/.bashrc`, and delete `<wt-folder>` (or `<folder-to-clone-into>`, if you used git). Your branch folders are ordinary git worktrees, so `git worktree list` and `git worktree remove` still work without `wt`.
+Remove the lines you added to `~/.zshrc` or `~/.bashrc`, and delete `<wt-folder>` (or `<folder-to-clone-into>`, if you used git). Your branch folders are ordinary git worktrees, so `git worktree list` and `git worktree remove` still work without `wt`. On Windows, read [Deleting branch folders yourself](#windows) before using `git worktree remove`.

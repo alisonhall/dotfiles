@@ -19,8 +19,14 @@
  *   node link-workspaces.mjs [rootDir] --clean      # remove the overrides we manage
  *   node link-workspaces.mjs [rootDir] --check      # report missing/wrong overrides; change nothing (exit 1 if any)
  */
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, rmSync, symlinkSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
+
+// Windows only allows folder symlinks with Developer Mode or admin rights, so use junctions
+// there, which need neither. Windows stores a junction's target as an absolute path, so
+// --relative has no effect on it.
+const isWindows = process.platform === 'win32';
+const linkType = isWindows ? 'junction' : 'dir';
 
 const args = process.argv.slice(2);
 const clean = args.includes('--clean');
@@ -67,7 +73,8 @@ const packages = [...new Set(patterns.flatMap(expand))]
   .filter((p) => p.name);
 
 // Top-level parents (first path segment relative to root): packages / surfaces / tools.
-const parents = [...new Set(packages.map((p) => relative(root, p.dir).split('/')[0]))];
+// (relative() uses \ on Windows)
+const parents = [...new Set(packages.map((p) => relative(root, p.dir).split(/[\\/]/)[0]))];
 
 let okCount = 0;
 let badCount = 0;
@@ -91,7 +98,11 @@ for (const parent of parents) {
       if (st && st.isSymbolicLink()) {
         const actual = readlinkSync(linkPath);
         const resolves = existsSync(resolve(dirname(linkPath), actual));
-        if (actual === expected && resolves) {
+        // A junction's stored target is always absolute, so on Windows check where it leads
+        const correct = isWindows
+          ? resolves && realpathSync(linkPath) === realpathSync(dir)
+          : actual === expected;
+        if (correct && resolves) {
           okCount++;
         } else if (!resolves) {
           badCount++; console.log(`  ${relative(root, linkPath)}: broken -> ${actual}`);
@@ -118,7 +129,7 @@ for (const parent of parents) {
       else rmSync(linkPath);
     } catch {}
     const target = useRelative ? relative(dirname(linkPath), dir) : dir;
-    symlinkSync(target, linkPath, 'dir');
+    symlinkSync(target, linkPath, linkType);
     console.log(`linked ${relative(root, linkPath)} -> ${target}`);
   }
 }
