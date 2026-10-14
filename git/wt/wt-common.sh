@@ -67,6 +67,21 @@ make_link() {
 	fi
 }
 
+# folder_in_use <folder>: Whether Windows won't let the folder be deleted right now, because a
+# program is using it (an editor, or a terminal that's in it). Deleting it would fail partway
+# and leave it half deleted, so this checks by renaming it and back, which either works or
+# fails as a whole. Never true on other systems, which allow deleting folders in use.
+folder_in_use() {
+	local probe="$1.wt-in-use-check-$$"
+	wt_is_windows || return 1
+	mv "$1" "$probe" 2>/dev/null || return 0
+	if ! mv "$probe" "$1" 2>/dev/null; then
+		echo "wt: couldn't rename $probe back to $1" >&2
+		return 0
+	fi
+	return 1
+}
+
 # remove_links <folder>: Delete the links (symlinks, and junctions on Windows) inside a
 # worktree folder, leaving what they point at alone. Run it before deleting the folder: on
 # Windows, `git worktree remove` follows junctions and deletes everything inside the folders

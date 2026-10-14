@@ -45,6 +45,34 @@ setup() {
 	export PATH="$BATS_TEST_TMPDIR/bin:$PATH"
 }
 
+teardown() {
+	release_folder
+}
+
+# hold_folder <folder>: On Windows, keep a program in the folder, as an editor or a terminal
+# would, until release_folder. (It has to be a Windows program: Git Bash's own processes don't
+# stop a folder being renamed.)
+hold_folder() {
+	local i
+	(cd "$1" && exec powershell.exe -NoProfile -NonInteractive -Command "Start-Sleep -Seconds 60") >/dev/null 2>&1 3>&- &
+	HOLDER=$!
+	# Wait until the folder is in use
+	for i in 1 2 3 4 5 6 7 8 9 10; do
+		mv "$1" "$1.check" 2>/dev/null || return 0
+		mv "$1.check" "$1"
+		sleep 1
+	done
+	echo "hold_folder: $1 still isn't in use" >&2
+	return 1
+}
+
+release_folder() {
+	[ -n "${HOLDER:-}" ] || return 0
+	kill "$HOLDER" 2>/dev/null
+	wait "$HOLDER" 2>/dev/null || true
+	HOLDER=""
+}
+
 is_windows() {
 	case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) return 0 ;; esac
 	return 1
@@ -165,4 +193,37 @@ merged_branch() {
 	[ "$status" -eq 0 ]
 	[ ! -e "$WT_WORKTREE_REPO_LOCATION/feature_done" ]
 	[ -f "$MAIN/node_modules/pkg/index.js" ]
+}
+
+@test "wt rm says so when the branch has no folder" {
+	run bash "$WT/wt.sh" rm feature/nothing
+	[ "$status" -ne 0 ]
+	[[ "$output" == *"there's no folder feature_nothing"* ]] || false
+}
+
+@test "on Windows, wt rm deletes nothing from a folder that's in use, rather than half of it" {
+	is_windows || skip "only Windows refuses to delete a folder that's in use"
+	merged_branch feature/busy
+	folder="$WT_WORKTREE_REPO_LOCATION/feature_busy"
+	echo notes > "$folder/notes.txt"
+	hold_folder "$folder"
+	run bash "$WT/wt.sh" rm feature/busy
+	release_folder
+	[ "$status" -ne 0 ]
+	[[ "$output" == *"in use by another program"* ]] || false
+	[ -f "$folder/notes.txt" ]
+	[ "$folder/node_modules" -ef "$MAIN/node_modules" ]
+}
+
+@test "on Windows, wt clean keeps a folder that's in use" {
+	is_windows || skip "only Windows refuses to delete a folder that's in use"
+	merged_branch feature/busy
+	folder="$WT_WORKTREE_REPO_LOCATION/feature_busy"
+	hold_folder "$folder"
+	run bash "$WT/wt.sh" clean --apply
+	release_folder
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"KEEP"*"feature_busy"*"in use by another program"* ]] || false
+	[ -f "$folder/.gitignore" ]
+	[ "$folder/node_modules" -ef "$MAIN/node_modules" ]
 }
