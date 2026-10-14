@@ -88,6 +88,21 @@ load fixture
 	[ "$status" -eq 0 ]
 }
 
+@test "doesn't flag quotes nested inside \"\${...}\"" {
+	add shell/common/a.sh \
+		'[ "${path#"$REPO_ROOT"/}" != "$path" ] && echo yes' \
+		'echo "${HOME%"/${dir}"}" "$HOME"'
+	check portability
+	[ "$status" -eq 0 ]
+}
+
+@test "still flags an unquoted path variable after a \"\${...}\" with nested quotes" {
+	add shell/common/a.sh 'echo "${path#"$REPO_ROOT"/}" $HOME'
+	check portability
+	[ "$status" -ne 0 ]
+	[[ "$output" == *"shell/common/a.sh:1:"* ]] || false
+}
+
 @test "flags Windows paths with backslashes" {
 	add shell/os/windows.sh 'cd C:\Program Files\Thing'
 	check portability
