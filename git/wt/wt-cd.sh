@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # wt-cd.sh — navigate to a worktree folder and fetch its remote branch.
 # If the folder does not exist yet, delegate to wt-add.sh to create it.
-# Invoked by the wt function (bin/wt/wt.sh), sourced from shell/common/git.sh.
+# Invoked by the wt function (git/wt/wt.sh), sourced from shell/common/git.sh.
 # The wrapper handles the interactive-shell cd; this script does the git work.
 
 if [ -z "${WT_WORKTREE_REPO_LOCATION:-}" ]; then

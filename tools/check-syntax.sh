@@ -9,7 +9,7 @@
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 
-bash_files=(install.sh .githooks/pre-commit tools/*.sh shell/bashrc.sh shell/common.sh shell/common/*.sh shell/os/*.sh bin/*)
+bash_files=(install.sh .githooks/pre-commit tools/*.sh shell/bashrc.sh shell/common.sh shell/common/*.sh shell/os/*.sh bin/* git/*.sh git/wt/*.sh)
 zsh_files=(shell/zshrc.sh shell/common.sh shell/common/*.sh shell/os/mac.sh config/p10k.zsh)
 failed=0
 

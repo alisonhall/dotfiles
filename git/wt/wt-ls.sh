@@ -34,7 +34,7 @@
 #   green = remote exists / clean, red = remote deleted / missing folder,
 #   yellow = unverified remote / changes present, dim = no upstream.
 #
-# Invoked by the wt function (bin/wt/wt.sh), sourced from shell/common/git.sh.
+# Invoked by the wt function (git/wt/wt.sh), sourced from shell/common/git.sh.
 
 set -uo pipefail
 
