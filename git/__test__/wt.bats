@@ -26,17 +26,37 @@ setup() {
 	mkdir -p "$MAIN/node_modules/pkg"
 	echo 'module.exports = 42' > "$MAIN/node_modules/pkg/index.js"
 
-	# A gh that's logged in, and says every existing branch's pull request was merged at its
-	# current commit (a branch that doesn't exist yet has no pull request)
+	# A gh that's logged in. Asked for every pull request of a branch (wt clean), it says each
+	# existing branch's was merged at its current commit (a branch that doesn't exist yet has
+	# none). Asked for merged ones only (wt add and wt cd), it lists those in FAKE_MERGED_PRS
+	# ("<branch>=<number> ..."). Like the real gh, it needs --repo outside a clone.
 	mkdir -p "$BATS_TEST_TMPDIR/bin"
 	cat > "$BATS_TEST_TMPDIR/bin/gh" <<-'EOF'
 		#!/usr/bin/env bash
 		case "$1 $2" in
 			"auth status") exit 0 ;;
 			"pr list")
-				while [ $# -gt 0 ]; do [ "$1" = --head ] && head="$2"; shift; done
-				oid="$(git -C "$WT_WORKTREE_REPO_LOCATION/main" rev-parse --verify --quiet "refs/heads/$head")" &&
-					printf '1\tMERGED\t%s\n' "$oid"
+				repo="" state="" head=""
+				while [ $# -gt 0 ]; do
+					case "$1" in
+						--repo) repo="$2" ;;
+						--state) state="$2" ;;
+						--head) head="$2" ;;
+					esac
+					shift
+				done
+				if [ -z "$repo" ] && ! git rev-parse --git-dir >/dev/null 2>&1; then
+					echo "failed to run git: fatal: not a git repository" >&2
+					exit 1
+				fi
+				if [ "$state" = merged ]; then
+					for pr in ${FAKE_MERGED_PRS:-}; do
+						[ "${pr%%=*}" = "$head" ] && echo "${pr#*=}"
+					done
+				else
+					oid="$(git -C "$WT_WORKTREE_REPO_LOCATION/main" rev-parse --verify --quiet "refs/heads/$head")" &&
+						printf '1\tMERGED\t%s\n' "$oid"
+				fi
 				;;
 			*) exit 1 ;;
 		esac
@@ -53,14 +73,15 @@ teardown() {
 # would, until release_folder. (It has to be a Windows program: Git Bash's own processes don't
 # stop a folder being renamed.)
 hold_folder() {
-	local i
-	(cd "$1" && exec powershell.exe -NoProfile -NonInteractive -Command "Start-Sleep -Seconds 60") >/dev/null 2>&1 3>&- &
+	local waited=0
+	(cd "$1" && exec powershell.exe -NoProfile -NonInteractive -Command "Start-Sleep -Seconds 120") >/dev/null 2>&1 3>&- &
 	HOLDER=$!
-	# Wait until the folder is in use
-	for i in 1 2 3 4 5 6 7 8 9 10; do
+	# Wait until the folder is in use (PowerShell can take a while to start on a busy machine)
+	while [ "$waited" -lt 30 ]; do
 		mv "$1" "$1.check" 2>/dev/null || return 0
 		mv "$1.check" "$1"
 		sleep 1
+		waited=$((waited + 1))
 	done
 	echo "hold_folder: $1 still isn't in use" >&2
 	return 1
@@ -247,4 +268,64 @@ merged_branch() {
 	run bash "$WT/wt.sh" ls --no-fetch
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"feature/new"*"untracked: none"* ]] || false
+}
+
+# deleted_after_merge <branch> <number>: A branch that was pushed, merged as pull request
+# <number>, and then deleted, from GitHub and from the clone. Prints its last commit.
+deleted_after_merge() {
+	local sha
+	git -C "$MAIN" switch -q -c "$1"
+	git -C "$MAIN" commit -q --allow-empty -m "work on $1"
+	sha="$(git -C "$MAIN" rev-parse HEAD)"
+	git -C "$MAIN" push -q origin "$1" 2>/dev/null
+	# GitHub keeps every pull request's last commit at refs/pull/<number>/head
+	git -C "$BATS_TEST_TMPDIR/origin.git" update-ref "refs/pull/$2/head" "$sha"
+	git -C "$MAIN" push -q origin --delete "$1" 2>/dev/null
+	git -C "$MAIN" switch -q main
+	git -C "$MAIN" branch -q -D "$1"
+	git -C "$MAIN" fetch -q --prune
+	echo "$sha"
+}
+
+#   -------------------------------
+#   BRANCHES DELETED AFTER MERGING
+#   -------------------------------
+
+@test "wt add brings back a branch that was deleted after its pull request was merged" {
+	sha="$(deleted_after_merge feature/gone 7)"
+	export FAKE_MERGED_PRS="feature/gone=7"
+	run bash "$WT/wt.sh" add feature/gone
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"merged PR #7 had this head"* ]] || false
+	[ "$(git -C "$WT_WORKTREE_REPO_LOCATION/feature_gone" rev-parse HEAD)" = "$sha" ]
+}
+
+@test "wt add finds the merged pull request without WT_REPO_SLUG, from the main folder's clone" {
+	sha="$(deleted_after_merge feature/gone 7)"
+	export FAKE_MERGED_PRS="feature/gone=7"
+	unset WT_REPO_SLUG
+	run bash "$WT/wt.sh" add feature/gone
+	[ "$status" -eq 0 ]
+	[ "$(git -C "$WT_WORKTREE_REPO_LOCATION/feature_gone" rev-parse HEAD)" = "$sha" ]
+}
+
+#   -------------------------------
+#   THE MAIN FOLDER'S BRANCH
+#   -------------------------------
+
+@test "wt ls doesn't warn about the main folder holding the start branch, even when that isn't main" {
+	git -C "$MAIN" switch -q -c develop
+	export CURRENT_DEV_BRANCH=develop
+	run bash "$WT/wt.sh" ls --no-fetch
+	[ "$status" -eq 0 ]
+	[[ "$output" != *"⚠"* ]] || false
+	[[ "$output" == *"branch ≠ folder: 0"* ]] || false
+}
+
+@test "wt ls warns when the main folder holds some other branch" {
+	git -C "$MAIN" switch -q -c feature/oops
+	run bash "$WT/wt.sh" ls --no-fetch
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"feature/oops"*"⚠ main folder isn't on main"* ]] || false
+	[[ "$output" == *"branch ≠ folder: 1"* ]] || false
 }

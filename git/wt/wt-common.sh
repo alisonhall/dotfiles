@@ -3,18 +3,26 @@
 # Sourced (not executed) by wt-add.sh, wt-cd.sh, wt-clean.sh, wt-link.sh and wt-rm.sh.
 #
 # These helpers read globals set by the calling script before they are invoked:
-#   WT_WORKTREE_REPO_LOCATION, CURRENT_REMOTE_NAME, REMOTE_BRANCH_NAME,
+#   WT_WORKTREE_REPO_LOCATION, MAIN_WT, CURRENT_REMOTE_NAME, REMOTE_BRANCH_NAME,
 #   LOCAL_BRANCH_NAME
 
 # Echo the number of a merged PR whose head was $REMOTE_BRANCH_NAME, or nothing
 # (when gh is unavailable or no such PR matches). GitHub keeps every PR's head
 # at refs/pull/<n>/head even after the branch is deleted, so the number alone is
 # enough to recover the change set.
+#
+# gh needs to know the repo: from WT_REPO_SLUG if it's set, and otherwise from the clone it's run
+# in. So it runs in the main worktree, since wt-add.sh works from the collection folder, which
+# isn't a clone (and gh fails there, which this would otherwise hide as "no merged PR").
 find_merged_pr() {
 	command -v gh >/dev/null 2>&1 || return 0
-	gh pr list --state merged --head "$REMOTE_BRANCH_NAME" \
-		--json number,headRefName \
-		--jq '.[] | select(.headRefName == "'"$REMOTE_BRANCH_NAME"'") | .number' 2>/dev/null | head -n 1
+	(
+		cd "$MAIN_WT" 2>/dev/null || exit 0
+		if [ -n "${WT_REPO_SLUG:-}" ]; then set -- --repo "$WT_REPO_SLUG"; else set --; fi
+		gh pr list "$@" --state merged --head "$REMOTE_BRANCH_NAME" \
+			--json number,headRefName \
+			--jq '.[] | select(.headRefName == "'"$REMOTE_BRANCH_NAME"'") | .number' 2>/dev/null | head -n 1
+	)
 }
 
 # Fetch the head commit of merged PR <pr_number> and echo its FULL SHA on

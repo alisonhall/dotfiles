@@ -16,7 +16,9 @@
 #     remote could not be verified, or the folder is missing)
 #   * a "branch ≠ folder" marker when a non-detached worktree's checked-out
 #     branch does not match its folder name (folder = branch with / -> _)
-#     (happens after a manual checkout, a branch rename, or a non-unique name)
+#     (happens after a manual checkout, a branch rename, or a non-unique name).
+#     The main folder is always called main, so it's flagged when it doesn't
+#     hold CURRENT_DEV_BRANCH (default: main) instead
 #
 # By default this script runs `git fetch` first so the ahead/behind numbers
 # (which compare against the remote-tracking refs) are current. Use --no-fetch
@@ -44,6 +46,8 @@ if [ -z "${WT_WORKTREE_REPO_LOCATION:-}" ]; then
 	exit 2
 fi
 CURRENT_REMOTE_NAME="${CURRENT_REMOTE_NAME:-origin}"
+# The branch the main folder holds (the main folder is always called main)
+DEV_BRANCH="${CURRENT_DEV_BRANCH:-main}"
 
 # Fetch remote-tracking refs before computing ahead/behind (default on). Pass
 # --no-fetch to skip it (faster / offline); --fetch is the explicit default.
@@ -332,8 +336,14 @@ for i in "${!paths[@]}"; do
 
 	# Flag a non-detached worktree whose checked-out branch does not match its
 	# folder name (folder = branch with / -> _). Detached worktrees have no
-	# branch, so they are not flagged here (already shown as detached).
-	if [ -n "$branch" ] && [ "${branch//\//_}" != "$folder" ]; then
+	# branch, so they are not flagged here (already shown as detached). The main
+	# folder is always called main, whatever the default branch, so it's
+	# expected to hold CURRENT_DEV_BRANCH (mismatch=2 when it doesn't).
+	if [ -z "$branch" ]; then
+		mismatch=0
+	elif [ "$path" = "$MAIN_WT" ]; then
+		if [ "$branch" = "$DEV_BRANCH" ]; then mismatch=0; else mismatch=2; fi
+	elif [ "${branch//\//_}" != "$folder" ]; then
 		mismatch=1
 	else
 		mismatch=0
@@ -373,6 +383,9 @@ for i in "${!disp_branch[@]}"; do
 	if [ "${disp_mismatch[$i]}" = "1" ]; then
 		printf '  %d. %s%s%s  %s⚠ branch ≠ folder%s\n' \
 			"$num" "$C_BOLD" "${disp_branch[$i]}" "$C_RESET" "$C_YELLOW" "$C_RESET"
+	elif [ "${disp_mismatch[$i]}" = "2" ]; then
+		printf '  %d. %s%s%s  %s⚠ main folder isn'"'"'t on %s%s\n' \
+			"$num" "$C_BOLD" "${disp_branch[$i]}" "$C_RESET" "$C_YELLOW" "$DEV_BRANCH" "$C_RESET"
 	else
 		printf '  %d. %s%s%s\n' "$num" "$C_BOLD" "${disp_branch[$i]}" "$C_RESET"
 	fi
@@ -453,7 +466,7 @@ for i in "${!disp_branch[@]}"; do
 		up-to-date) ab_up_to_date=$((ab_up_to_date+1)) ;;
 		diverged)   ab_diverged=$((ab_diverged+1)) ;;
 	esac
-	[ "${disp_mismatch[$i]}" = "1" ] && mismatch_count=$((mismatch_count+1))
+	[ "${disp_mismatch[$i]}" != "0" ] && mismatch_count=$((mismatch_count+1))
 done
 
 printf '%s\n' ""

@@ -275,7 +275,7 @@ Open a new terminal after changing either file.
 | --- | --- | --- | --- |
 | `WT_WORKTREE_REPO_LOCATION` | Always | | `<repo-location>`: the folder that contains `main/` (see [step C](#c-set-up-the-repos-folder)) |
 | `WT_REPO_SLUG` | For `wt clean` | | `<repo-owner>/<repo-name>`: the GitHub repo's owner and name |
-| `CURRENT_DEV_BRANCH` | No | `main` | The branch that `wt add` starts new branches from |
+| `CURRENT_DEV_BRANCH` | No | `main` | The branch that `wt add` starts new branches from, and that the `main` folder holds (`wt ls` warns if it holds another) |
 | `CURRENT_REMOTE_NAME` | No | `origin` | The git remote that points at GitHub |
 | `WT_PROTECTED_BRANCHES` | No | `main` | Branches `wt clean` never deletes, separated by spaces, like `"main develop"` |
 | `WT_SAFE_ARTIFACTS` | No | | More files or folders that `wt clean` may delete along with a branch folder, separated by spaces, like `".cache bundle-analysis.html"`. Use it for generated files your repo ignores, so they don't stop a folder being cleaned |
