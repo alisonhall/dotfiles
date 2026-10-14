@@ -12,6 +12,7 @@
 # first so nothing gets written through it.
 #
 # Set DOTFILES_SKIP_GITLEAKS=1 to skip installing gitleaks (e.g. in CI).
+# Set DOTFILES_SKIP_P10K=1 to skip installing powerlevel10k and its font.
 
 # Re-run with bash if started some other way (e.g. `sh install.sh` or `zsh install.sh`)
 if [ -z "${BASH_VERSION:-}" ]; then
@@ -267,7 +268,7 @@ setup_shell() {
 	echo "Shell:"
 	ensure_block "$HOME/.bashrc" "$(shell_block shell/bashrc.sh)"
 	setup_bash_profile
-	if command -v zsh >/dev/null 2>&1 || [ -f "$HOME/.zshrc" ]; then
+	if zsh_available; then
 		ensure_block "$HOME/.zshrc" "$(shell_block shell/zshrc.sh)"
 	fi
 
@@ -275,6 +276,93 @@ setup_shell() {
 		cp "$DOTFILES/local.example.sh" "$HOME/.shell_local"
 		echo "  Created ~/.shell_local from local.example.sh - fill it in for this machine"
 	fi
+}
+
+#   -------------------------------
+#   ZSH PROMPT (powerlevel10k)
+#   -------------------------------
+#
+# config/p10k.zsh assumes powerlevel10k and its MesloLGS NF icon font are
+# installed; shell/zshrc.sh otherwise silently falls back to a plain prompt.
+# Only attempted when zsh is actually relevant on this machine (see
+# zsh_available) - no point installing a zsh theme and a font for a bash-only
+# account. Neither is needed to use the dotfiles themselves.
+
+# Whether zsh is relevant on this machine: it's installed, or ~/.zshrc already
+# exists (e.g. from a previous install.sh run). Also used by setup_shell.
+zsh_available() {
+	command -v zsh >/dev/null 2>&1 || [ -f "$HOME/.zshrc" ]
+}
+
+has_powerlevel10k() {
+	[ -f "/opt/homebrew/share/powerlevel10k/powerlevel10k.zsh-theme" ] ||
+		[ -f "/usr/local/share/powerlevel10k/powerlevel10k.zsh-theme" ] ||
+		[ -f "$HOME/powerlevel10k/powerlevel10k.zsh-theme" ]
+}
+
+has_meslo_font() {
+	[ -f "$HOME/Library/Fonts/MesloLGS NF Regular.ttf" ] ||
+		[ -f "/Library/Fonts/MesloLGS NF Regular.ttf" ] ||
+		[ -f "$HOME/.local/share/fonts/MesloLGS NF Regular.ttf" ] ||
+		[ -f "$HOME/.fonts/MesloLGS NF Regular.ttf" ]
+}
+
+# Downloads the 4 MesloLGS NF weights straight from the powerlevel10k repo. Used when there's no
+# Homebrew (or its cask install isn't allowed). No package manager on Windows handles fonts, so
+# this only covers macOS and Linux; Windows users are pointed at the manual install instead.
+download_meslo_font() {
+	local font_dir
+	case "$(uname -s)" in
+		Darwin*) font_dir="$HOME/Library/Fonts" ;;
+		Linux*) font_dir="$HOME/.local/share/fonts" ;;
+		*) return 1 ;;
+	esac
+	mkdir -p "$font_dir" || return 1
+	local weight
+	for weight in Regular Bold Italic "Bold%20Italic"; do
+		curl -fsSL -o "$font_dir/MesloLGS NF ${weight//%20/ }.ttf" \
+			"https://github.com/romkatv/powerlevel10k/raw/master/font/MesloLGS%20NF%20$weight.ttf" || return 1
+	done
+	command -v fc-cache >/dev/null 2>&1 && fc-cache -f "$font_dir" >/dev/null 2>&1
+	return 0
+}
+
+install_powerlevel10k() {
+	if has_powerlevel10k; then
+		echo "  powerlevel10k is installed"
+	elif [ -n "${DOTFILES_SKIP_P10K:-}" ]; then
+		echo "  Skipping powerlevel10k install (DOTFILES_SKIP_P10K is set)"
+	elif command -v brew >/dev/null 2>&1 && brew install powerlevel10k >/dev/null 2>&1; then
+		echo "  Installed powerlevel10k with Homebrew"
+	elif command -v git >/dev/null 2>&1 &&
+		git clone --depth=1 -q https://github.com/romkatv/powerlevel10k.git "$HOME/powerlevel10k" >/dev/null 2>&1; then
+		echo "  Installed powerlevel10k to ~/powerlevel10k"
+	else
+		note "couldn't install powerlevel10k. The zsh prompt (config/p10k.zsh) will be plain until it's installed:"
+		detail "https://github.com/romkatv/powerlevel10k#installation"
+	fi
+}
+
+install_meslo_font() {
+	if has_meslo_font; then
+		echo "  MesloLGS NF (powerlevel10k's icon font) is installed"
+	elif [ -n "${DOTFILES_SKIP_P10K:-}" ]; then
+		echo "  Skipping font install (DOTFILES_SKIP_P10K is set)"
+	elif command -v brew >/dev/null 2>&1 && brew install --cask font-meslo-for-powerlevel10k >/dev/null 2>&1; then
+		echo "  Installed the MesloLGS NF font with Homebrew"
+	elif download_meslo_font; then
+		echo "  Installed the MesloLGS NF font"
+	else
+		note "couldn't install the MesloLGS NF font. powerlevel10k's icons won't render correctly until it's installed:"
+		detail "https://github.com/romkatv/powerlevel10k#manual-font-installation"
+	fi
+}
+
+setup_zsh_prompt() {
+	zsh_available || return 0
+	echo "Zsh prompt:"
+	install_powerlevel10k
+	install_meslo_font
 }
 
 #   -------------------------------
@@ -653,6 +741,14 @@ check_reminders() {
 		note "gitleaks isn't installed, so commits to this repo will be blocked until it is."
 		reminders_shown=1
 	fi
+	if zsh_available && ! has_powerlevel10k; then
+		note "powerlevel10k isn't installed, so new zsh shells get a plain prompt instead of config/p10k.zsh's."
+		reminders_shown=1
+	fi
+	if zsh_available && has_powerlevel10k && ! has_meslo_font; then
+		note "the MesloLGS NF font isn't installed, so powerlevel10k's icons won't render correctly."
+		reminders_shown=1
+	fi
 	if [ "$IS_GIT_CLONE" = 0 ]; then
 		:
 	elif [ ! -f "$HOME/.dotfiles_blocklist" ] || ! grep -qvE '^[[:space:]]*(#|$)' "$HOME/.dotfiles_blocklist"; then
@@ -689,7 +785,7 @@ check_new_shells() {
 		fi
 
 		# Ignore the noise from starting an interactive shell without a terminal
-		errors="$(grep -vE 'terminal process group|no job control|tcsetattr|Inappropriate ioctl|default interactive shell is now zsh|chsh -s /bin/zsh|HT208050|^[[:space:]]*$' "$stderr_file" || true)"
+		errors="$(grep -vE 'terminal process group|no job control|tcsetattr|Inappropriate ioctl|default interactive shell is now zsh|chsh -s /bin/zsh|HT208050|can.t change option: monitor|gitstatus failed to initialize|GITSTATUS_LOG_LEVEL|Restart Zsh to retry gitstatus initialization|Add the following parameter.*for extra diagnostics|exec zsh|^[[:space:]]*$' "$stderr_file" || true)"
 		if [ -n "$errors" ]; then
 			warning "new $shell shells print errors while starting:"
 			printf '%s\n' "$errors" | head -10 | cut -c1-200 | sed 's/^/    /'
@@ -723,6 +819,7 @@ main() {
 
 	if [ "$MODE" = install ]; then
 		setup_shell
+		setup_zsh_prompt
 		setup_git
 		setup_iterm
 		setup_repo_hooks
