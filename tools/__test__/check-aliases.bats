@@ -90,6 +90,14 @@ gitconfig() { add git/gitconfig '[alias]' "$@"; }
 	[[ "$output" == *"status = status -s  (git ignores aliases named after built-in commands)"* ]] || false
 }
 
+@test "flags git aliases named after a git-* script in bin/, which git runs instead" {
+	add_executable bin/git-tidy '#!/usr/bin/env bash' 'echo tidy'
+	gitconfig 'tidy = !echo alias'
+	check aliases
+	[ "$status" -ne 0 ]
+	[[ "$output" == *"tidy = !echo alias  (git runs bin/git-tidy instead, which is on PATH)"* ]] || false
+}
+
 @test "flags git aliases that run something that isn't a git command or alias" {
 	gitconfig 'oops = notacommand --flag'
 	check aliases

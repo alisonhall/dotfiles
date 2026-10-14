@@ -18,8 +18,9 @@
 #
 # Git aliases (git/gitconfig):
 #   6. Aliases git can't run: the first word isn't a git command or alias (e.g. "git stash ...",
-#      which runs `git git stash`), an alias named after a built-in command (git ignores those),
-#      or an alias that leads back to itself
+#      which runs `git git stash`), an alias named after a built-in command (git ignores those)
+#      or after a git-* script in bin/ (git runs the script instead, since bin/ is on PATH), or
+#      an alias that leads back to itself
 #   7. ! aliases with syntax errors, or with bash-only syntax ([[ ]], ==, ${x//...}): git runs
 #      them with sh, which is dash on Ubuntu and WSL
 #
@@ -337,8 +338,10 @@ if [ -f "$gitconfig" ] && command -v git >/dev/null 2>&1; then
 	ignored=" $(grep -E 'alias-check: ignore' "$gitconfig" | sed -E 's/^[[:space:]]*([^[:space:]=]+)[[:space:]]*=.*/\1/' | tr '[:upper:]' '[:lower:]' | tr '\n' ' ') "
 
 	builtins=" $(git --list-cmds=builtins 2>/dev/null | tr '\n' ' ') "
-	# Every git command (including git-* scripts in this repo's bin/, which is on PATH)
-	git_commands=" $(git --list-cmds=main,others,nohelpers 2>/dev/null | tr '\n' ' ') $(for f in bin/git-*; do [ -f "$f" ] && printf '%s ' "${f#bin/git-}"; done) "
+	# git-* scripts in this repo's bin/, which is on PATH, so each is a git command too
+	bin_git_commands=" $(for f in bin/git-*; do [ -f "$f" ] && printf '%s ' "${f#bin/git-}"; done) "
+	# Every git command
+	git_commands=" $(git --list-cmds=main,others,nohelpers 2>/dev/null | tr '\n' ' ')$bin_git_commands"
 	alias_names=" $(cut -f1 "$work_dir/git-aliases" | tr '\n' ' ') "
 
 	# ! aliases: syntax-check them all at once in sh (and dash, if installed), one at a time only
@@ -366,6 +369,8 @@ if [ -f "$gitconfig" ] && command -v git >/dev/null 2>&1; then
 		case "$ignored" in *" $name "*) continue ;; esac
 		if [[ "$builtins" == *" $name "* ]]; then
 			run_problems+="$name = $value  (git ignores aliases named after built-in commands)"$'\n'
+		elif [[ "$bin_git_commands" == *" $name "* ]]; then
+			run_problems+="$name = $value  (git runs bin/git-$name instead, which is on PATH)"$'\n'
 		fi
 		case "$value" in
 			'!'*) ;;

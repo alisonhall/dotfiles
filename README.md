@@ -72,7 +72,7 @@ These live in `git/` rather than `bin/` because you run them through a git alias
 
 | File | Contents |
 | --- | --- |
-| `git/branch-status.sh` | Richer branch status report: remote/PR state (via `gh`), worktree awareness, and squash-merge-aware "in base" detection. Run via the `branch-status` git alias |
+| `git/branch-status.sh` | Richer branch status report: remote/PR state (via `gh`), worktree awareness, and squash-merge-aware "in base" detection. Run it with `git branch-report` (`git branch-status` runs `bin/git-branch-status`) |
 | `git/wt/` | A git worktree manager, run as `wt` (see `wt help` once a shell has loaded this repo). Configure it per-repo with a `WT_*`-exporting alias in `~/.shell_local` (`wt help` documents the variables) |
 
 ### VS Code
