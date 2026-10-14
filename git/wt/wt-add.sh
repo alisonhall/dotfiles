@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # wt-add.sh — create a new git worktree from a remote branch name.
-# Invoked by the wt function (bin/wt/wt.sh), sourced from shell/common/git.sh.
+# Invoked by the wt function (git/wt/wt.sh), sourced from shell/common/git.sh.
 # The wrapper handles the interactive-shell cd; this script does the git work.
 
 if [ -z "${WT_WORKTREE_REPO_LOCATION:-}" ]; then

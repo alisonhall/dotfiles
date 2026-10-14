@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # wt-rm.sh — remove a worktree folder and prune stale worktree registrations.
-# Invoked by the wt function (bin/wt/wt.sh), sourced from shell/common/git.sh.
+# Invoked by the wt function (git/wt/wt.sh), sourced from shell/common/git.sh.
 
 if [ -z "${WT_WORKTREE_REPO_LOCATION:-}" ]; then
 	echo "error: WT_WORKTREE_REPO_LOCATION is not set." >&2

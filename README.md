@@ -45,7 +45,7 @@ The installer doesn't replace your existing config files. It:
 | | Shared (in this repo) | This machine only (not in the repo) |
 | --- | --- | --- |
 | Shell | `shell/` (see below) | `~/.shell_local` |
-| Git | `git/gitconfig`, `git/gitignore_global` | `~/.gitconfig` (below the include) |
+| Git | `git/gitconfig`, `git/gitignore_global`, `git/` tools (see below) | `~/.gitconfig` (below the include) |
 | Prompt (zsh) | `config/p10k.zsh` | `~/.p10k.zsh`, if present, is used instead |
 | iTerm (macOS) | `config/iterm/` | |
 | VS Code | `config/vscode/` (not applied automatically - see below) | |
@@ -66,6 +66,15 @@ Run `showa <text>` to find where an alias or function is defined.
 
 Tools that edit your shell config themselves (conda, nvm and similar) write to `~/.zshrc` / `~/.bashrc` and not to this repo, which is what you want.
 
+### Git tools
+
+These live in `git/` rather than `bin/` because you run them through a git alias or shell function, not by name, so they don't need to be on `PATH`:
+
+| File | Contents |
+| --- | --- |
+| `git/branch-status.sh` | Richer branch status report: remote/PR state (via `gh`), worktree awareness, and squash-merge-aware "in base" detection. Run via the `branch-status` git alias |
+| `git/wt/` | A git worktree manager, run as `wt` (see `wt help` once a shell has loaded this repo). Configure it per-repo with a `WT_*`-exporting alias in `~/.shell_local` (`wt help` documents the variables) |
+
 ### VS Code
 
 Unlike the shell and git config, `config/vscode/` isn't linked in automatically by `install.sh`. It's a reference copy of portable editor settings and snippets:
@@ -79,7 +88,7 @@ To use them, copy or symlink `config/vscode/settings.json` to VS Code's user `se
 
 ## Scripts
 
-Everything in `bin/` is on your `PATH`. `bin/wt/` is a git worktree manager (see `wt help` once a shell has loaded this repo); configure it per-repo with a `WT_*`-exporting alias in `~/.shell_local` (`wt help` documents the variables).
+Everything in `bin/` is on your `PATH`.
 
 | Script | What it does |
 | --- | --- |
@@ -87,7 +96,6 @@ Everything in `bin/` is on your `PATH`. `bin/wt/` is a git worktree manager (see
 | `timestamps.sh` | Common `date` formats, with their output right now |
 | `format-git-objects.sh` | Source it to get `$allFormatOptions`, a list of every `git for-each-ref --format` field |
 | `git-branch-status` | How far each branch is ahead of or behind its upstream ([upstream project](https://github.com/bill-auger/git-branch-status), GPLv3) |
-| `branch-status.sh` | Richer branch status report: remote/PR state (via `gh`), worktree awareness, and squash-merge-aware "in base" detection. Run via the `branch-status` git alias |
 | `remove-merged-branches` | Delete local branches merged into the current one, after you review the list |
 | `screenshots-of-urls` | Screenshot a page at several widths with Firefox: `screenshots-of-urls <url> [folder] [widths...]` |
 | `createpdf.sh`, `createallpdfs.sh` | Make a PDF from the images in a folder (or each subfolder). Needs ImageMagick and exiftool |
@@ -133,6 +141,7 @@ What's tested:
 | `__test__/` | `install.sh`: the shell blocks it manages, and the order of `~/.gitconfig` |
 | `tools/__test__/` | Each `check-*.sh` flags a bad example and passes a good one, in a throwaway git repo |
 | `shell/__test__/` | `path_add` and the Homebrew setup in `shell/common.sh` |
+| `git/__test__/` | The `bclean`, `m`, `co-wip`/`coa-wip` and `merge-no-commit` git aliases, and `git/branch-status.sh` |
 | `shell/common/__test__/` | `git_dev_branch`, which `dev`, `sprint`, `gmerge-dev` and others use |
 
 Install bats with `brew install bats-core` (macOS), `sudo apt install bats` (Linux) or `npm install -g bats` (Git Bash). CI runs the tests on macOS (including its built-in bash 3.2), Linux and Windows. The commit hook doesn't, so commits stay fast and work without bats.

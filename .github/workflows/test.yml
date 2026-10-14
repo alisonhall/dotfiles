@@ -36,7 +36,7 @@ jobs:
           shellcheck --version
           shellcheck -S error -s bash install.sh .githooks/pre-commit tools/*.sh \
             shell/bashrc.sh shell/common.sh shell/common/*.sh shell/os/*.sh \
-            $(ls bin/* | grep -v git-branch-status)
+            $(find bin -maxdepth 1 -type f ! -name git-branch-status) git/*.sh git/wt/*.sh
 
   install:
     name: Install (${{ matrix.os }})

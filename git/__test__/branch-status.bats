@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# Tests for bin/branch-status.sh: a read-only report of local branch(es) vs a base branch.
+# Tests for git/branch-status.sh: a read-only report of local branch(es) vs a base branch.
 
 setup() {
 	SCRIPT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)/branch-status.sh"

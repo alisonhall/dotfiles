@@ -13,7 +13,8 @@
 #      in shell/os/<os>.sh for each OS that lacks it: the command itself (like pbcopy in
 #      os/windows.sh) or the alias/function.
 #   5. Options that only exist in the GNU version of a tool (Linux, Git Bash) or the BSD one
-#      (macOS) - e.g. sed -i, date --utc, grep -P. Also checked in bin/ scripts and git aliases.
+#      (macOS) - e.g. sed -i, date --utc, grep -P. Also checked in bin/ and git/ scripts, and in
+#      git aliases.
 #
 # Git aliases (git/gitconfig):
 #   6. Aliases git can't run: the first word isn't a git command or alias (e.g. "git stash ...",
@@ -283,9 +284,9 @@ report "Alias names a shell won't accept:" "${name_problems%$'\n'}"
 report "Double-quoted aliases with \$ - these expand once when the shell starts; use single quotes:" "$(problems_of_kind double)"
 report "Commands some OSes don't have:" "$(problems_of_kind command)"
 
-# 5 for bin/ scripts too (they run on every OS)
+# 5 for bin/ and git/ scripts too (they run on every OS)
 bin_files=()
-for file in bin/*; do
+for file in bin/* git/*.sh git/wt/*.sh; do
 	[ -f "$file" ] || continue
 	case " ${third_party[*]} " in *" $file "*) continue ;; esac
 	bin_files+=("$file")
