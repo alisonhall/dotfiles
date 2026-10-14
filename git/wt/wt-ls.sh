@@ -107,7 +107,10 @@ n=0
 while IFS= read -r line; do
 	case "$line" in
 		worktree\ *)
-			paths+=("${line#worktree }")
+			# The same physical form as REPO_ROOT, so folder_location can compare them (on
+			# Windows, git writes C:/... and Git Bash /c/...). A missing folder is kept as is.
+			wt_path="${line#worktree }"
+			paths+=("$(cd "$wt_path" 2>/dev/null && pwd -P || printf '%s' "$wt_path")")
 			heads+=("")
 			branches+=("")
 			prunable+=("0")
@@ -217,6 +220,8 @@ untracked_count() {
 		[ -z "$f" ] && continue
 		f="${f%/}"
 		[ -L "$path/$f" ] && continue
+		# Shared with main through a Windows hard link (see make_link in wt-common.sh)
+		[ "$path" != "$MAIN_WT" ] && [ "$path/$f" -ef "$MAIN_WT/$f" ] && continue
 		count=$((count+1))
 	done < <(git -C "$path" ls-files --others --exclude-standard --directory 2>/dev/null)
 	echo "$count"

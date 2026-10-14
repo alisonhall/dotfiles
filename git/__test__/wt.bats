@@ -227,3 +227,24 @@ merged_branch() {
 	[ -f "$folder/.gitignore" ]
 	[ "$folder/node_modules" -ef "$MAIN/node_modules" ]
 }
+
+#   -------------------------------
+#   LISTING BRANCH FOLDERS
+#   -------------------------------
+
+@test "wt ls shows branch folders next to main as separate folders, not outside the repo" {
+	bash "$WT/wt.sh" add feature/new >/dev/null 2>&1
+	run bash "$WT/wt.sh" ls --no-fetch
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"folder:  feature_new  [sibling]"* ]] || false
+	[[ "$output" != *"[outside]"* ]] || false
+}
+
+@test "wt ls doesn't count files shared with main as untracked" {
+	echo debug=1 > "$MAIN/settings.local"
+	export WT_SYMLINK_PAIRS=settings.local
+	bash "$WT/wt.sh" add feature/new >/dev/null 2>&1
+	run bash "$WT/wt.sh" ls --no-fetch
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"feature/new"*"untracked: none"* ]] || false
+}
