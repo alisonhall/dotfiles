@@ -8,3 +8,5 @@ Thumbs.db
 
 # Editors
 *~
+
+**/.claude/settings.local.json
