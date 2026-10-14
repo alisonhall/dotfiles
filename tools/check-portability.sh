@@ -145,7 +145,8 @@ for path in "${paths[@]}"; do
 done
 
 # Walks the code character by character, tracking quotes with a stack (u = unquoted,
-# d = "double", s = 'single', c = $(...) or (...)), so "$(cd "$dir")" counts as quoted.
+# d = "double", s = 'single', c = $(...) or (...), p = ${...} inside "double"), so
+# "$(cd "$dir")" and "${path#"$dir"/}" count as quoted.
 # Single-quoted alias bodies are checked as code. Heredoc contents and comments are skipped.
 scan_code='
 	function is_path_var(name) {
@@ -177,9 +178,17 @@ scan_code='
 			if (ch ~ /[A-Za-z]/ && substr(text, i + 1, 2) == ":\\" && (i == 1 || substr(text, i - 1, 1) !~ /[A-Za-z0-9_]/))
 				problem("backslash", original)
 			if (ch == "\\") { i++; continue }
+			if (ctx == "p") {
+				if (ch == "}") top--
+				else if (ch == "\"") stack[++top] = "d"
+				else if (substr(text, i, 2) == "$(") { stack[++top] = "c"; i++ }
+				else if (substr(text, i, 2) == "${") { stack[++top] = "p"; i++ }
+				continue
+			}
 			if (ctx == "d") {
 				if (ch == "\"") top--
 				else if (substr(text, i, 2) == "$(") { stack[++top] = "c"; i++ }
+				else if (substr(text, i, 2) == "${") { stack[++top] = "p"; i++ }
 				continue
 			}
 			if (ch == "#" && (i == 1 || substr(text, i - 1, 1) ~ /[[:space:];]/)) break
