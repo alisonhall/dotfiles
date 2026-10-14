@@ -103,6 +103,12 @@ load fixture
 	[[ "$output" == *"(Windows only)"* ]] || false
 }
 
+@test "doesn't mistake printf's %s%s for a Windows %VAR% path" {
+	add shell/common/a.sh "printf '%sYES%s (%s)\\n' \"\$C_GREEN\" \"\$C_RESET\" \"\$reason\""
+	check portability
+	[ "$status" -eq 0 ]
+}
+
 @test "allows a line marked path-check: ignore" {
 	add shell/common/a.sh 'cd $HOME/projects  # path-check: ignore'
 	check portability
