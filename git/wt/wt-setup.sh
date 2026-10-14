@@ -117,9 +117,26 @@ choose() {
 	done
 }
 
-# full_path <path>: The path with ~ expanded, made absolute, without a trailing /
+# os_name: uname -s, which tests can override with WT_SETUP_OS
+os_name() {
+	printf '%s' "${WT_SETUP_OS:-$(uname -s)}"
+}
+
+# is_windows: Whether this is Git Bash (or another Unix layer) on Windows
+is_windows() {
+	case "$(os_name)" in MINGW* | MSYS* | CYGWIN*) return 0 ;; esac
+	return 1
+}
+
+# quiet_git <args>: git that fails rather than waiting for a password or an SSH prompt
+quiet_git() {
+	GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes}" git "$@"
+}
+
+# full_path <path>: The path with ~ expanded, made absolute, without a trailing /. Windows paths
+# (C:\Users\...) get forward slashes, which Git Bash and Windows programs both accept.
 full_path() {
-	local path="$1"
+	local path="${1//\\//}"
 	case "$path" in
 		"~") path="$HOME" ;;
 		"~/"*) path="$HOME/${path#\~/}" ;;
@@ -167,9 +184,10 @@ is_clone() {
 	is_checkout "$1" && [ "$(git -C "$1" rev-parse --git-dir)" = "$(git -C "$1" rev-parse --git-common-dir)" ]
 }
 
-# github_slug <url>: owner/name from a GitHub URL, or nothing for any other URL
+# github_slug <url>: owner/name from a GitHub URL, or nothing for any other URL. Includes SSH host
+# aliases for a second GitHub account, like git@github-work:owner/name.git
 github_slug() {
-	printf '%s\n' "$1" | sed -nE 's#/$##; s#\.git$##; s#^(https?://|ssh://)?([^@/]+@)?github\.com[:/]([^/]+/[^/]+)$#\3#p'
+	printf '%s\n' "$1" | sed -nE 's#/$##; s#\.git$##; s#^(https?://|ssh://)?([^@/]+@)?github(\.com)?(-[A-Za-z0-9_.-]+)?[:/]([^/]+/[^/]+)$#\5#p'
 }
 
 # clone_remote <folder>: The clone's remote for GitHub: origin, or else its first remote
@@ -194,7 +212,94 @@ remote_default_branch() {
 	if [ -n "$SLUG" ] && [ -z "$CLONE_URL" ] && [ "$GH_READY" = 1 ]; then
 		gh repo view "$SLUG" --json defaultBranchRef --jq .defaultBranchRef.name 2>/dev/null && return
 	fi
-	GIT_TERMINAL_PROMPT=0 git ls-remote --symref "$(clone_source)" HEAD 2>/dev/null | awk '/^ref:/ { sub("refs/heads/", "", $2); print $2; exit }'
+	quiet_git ls-remote --symref "$(clone_source)" HEAD 2>/dev/null | awk '/^ref:/ { sub("refs/heads/", "", $2); print $2; exit }'
+}
+
+# repo_reachable: Whether the repo to clone exists and this user can read it
+repo_reachable() {
+	if [ -n "$SLUG" ] && [ -z "$CLONE_URL" ] && [ "$GH_READY" = 1 ]; then
+		gh repo view "$SLUG" >/dev/null 2>&1
+	else
+		quiet_git ls-remote --heads "$(clone_source)" >/dev/null 2>&1
+	fi
+}
+
+# branch_exists <branch>: Whether the repo has the branch. Also succeeds when there's no way to
+# check (a repo that couldn't be reached), so that isn't reported as a missing branch.
+branch_exists() {
+	if [ "$MODE" = clone ]; then
+		[ "$REACHABLE" = 1 ] || return 0
+		if [ -n "$SLUG" ] && [ -z "$CLONE_URL" ] && [ "$GH_READY" = 1 ]; then
+			gh api "repos/$SLUG/branches/$1" >/dev/null 2>&1
+		else
+			quiet_git ls-remote --exit-code --heads "$(clone_source)" "refs/heads/$1" >/dev/null 2>&1
+		fi
+	else
+		git -C "$clone_dir" show-ref --verify --quiet "refs/remotes/$REMOTE/$1" ||
+			git -C "$clone_dir" show-ref --verify --quiet "refs/heads/$1"
+	fi
+}
+
+# outside_blocks <file>: The file's lines as "<line number>:<line>", leaving out this script's blocks
+outside_blocks() {
+	[ -f "$1" ] || return 0
+	awk '
+		{ line = $0; sub(/\r$/, "", line) }
+		line ~ /^# >>> wt: .* >>>$/ { inside = 1; next }
+		line ~ /^# <<< wt: .* <<<$/ { inside = 0; next }
+		!inside { print FNR ":" line }
+	' "$1"
+}
+
+# defined_in <file> <name>: Prints the first line outside this script's blocks that defines <name>
+# as an alias or function. Defining a function after an alias of the same name is a syntax error.
+defined_in() {
+	outside_blocks "$1" | NAME="$2" awk '
+		{
+			number = $0; sub(/:.*/, "", number)
+			code = substr($0, length(number) + 2); sub(/^[ \t]+/, "", code)
+			n = ENVIRON["NAME"]
+			if (index(code, "alias " n "=") == 1 || index(code, n "()") == 1 || index(code, n " ()") == 1 ||
+				code == "function " n || index(code, "function " n " ") == 1 || index(code, "function " n "(") == 1 ||
+				index(code, "function " n "{") == 1) {
+				print "line " number ": " code
+				found = 1
+				exit
+			}
+		}
+		END { exit !found }'
+}
+
+# loads_wt <file>: Whether the file, outside this script's blocks, loads a wt.sh that exists
+# (not one in a comment, or a copy that's since been deleted)
+loads_wt() {
+	local entry path
+	while IFS= read -r entry; do
+		path="$(printf '%s\n' "${entry#*:}" | sed -nE "s/^[[:space:]]*(\.|source)[[:space:]]+[\"']?([^\"' ;]*wt\.sh)[\"']?([[:space:];].*)?$/\2/p")"
+		[ -n "$path" ] || continue
+		case "$path" in
+			"~/"*) path="$HOME/${path#\~/}" ;;
+			'$HOME/'*) path="$HOME/${path#\$HOME/}" ;;
+			'${HOME}/'*) path="$HOME/${path#\$\{HOME\}/}" ;;
+		esac
+		[ -f "$path" ] && return 0
+	done < <(outside_blocks "$1")
+	return 1
+}
+
+# bash_login_file: The file a bash login shell reads (macOS Terminal and Git Bash open login shells,
+# which don't read ~/.bashrc themselves): the first of these that exists, or ~/.bash_profile
+bash_login_file() {
+	local file
+	for file in "$HOME/.bash_profile" "$HOME/.bash_login" "$HOME/.profile"; do
+		[ -f "$file" ] && { printf '%s' "$file"; return; }
+	done
+	printf '%s' "$HOME/.bash_profile"
+}
+
+# loads_bashrc <file>: Whether the file loads ~/.bashrc, on a line that isn't a comment
+loads_bashrc() {
+	[ -f "$1" ] && grep -qE '^[[:space:]]*[^#]*(\.|source)[[:space:]]+.*\.bashrc' "$1"
 }
 
 # clone_source: What to clone: the URL given, or the GitHub repo over HTTPS
@@ -263,15 +368,27 @@ default_repo="$(github_slug "$current_url")"
 [ -n "$default_repo" ] || default_repo="$current_url"
 
 heading "Repo"
-SLUG=""
-CLONE_URL=""
-ask_required repo "Which repo? Its GitHub owner/name (like octocat/hello-world), or a URL to clone" "$default_repo"
-if [[ "$repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] && [ ! -e "$repo" ]; then
-	SLUG="$repo"
-else
-	CLONE_URL="$repo"
-	SLUG="$(github_slug "$repo")"
-fi
+while :; do
+	SLUG=""
+	CLONE_URL=""
+	ask_required repo "Which repo? Its GitHub owner/name (like octocat/hello-world), or a URL to clone" "$default_repo"
+	if [[ "$repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] && [ ! -e "$repo" ]; then
+		SLUG="$repo"
+	else
+		CLONE_URL="$repo"
+		SLUG="$(github_slug "$repo")"
+	fi
+	# Check now, so a typo doesn't only show up when cloning at the end
+	if repo_reachable; then
+		REACHABLE=1
+		break
+	fi
+	say "  Couldn't reach $(clone_source). Check the name, and that you have access to it."
+	if ask_yes_no "Use it anyway? (Only if you'll use a clone you already have)" n; then
+		REACHABLE=0
+		break
+	fi
+done
 if [ -n "$SLUG" ]; then
 	REPO_NAME="${SLUG#*/}"
 else
@@ -322,6 +439,7 @@ else
 		"Clone the repo from $(clone_source)" \
 		"Move a clone I already have"
 	if [ "$how" = 1 ]; then
+		[ "$REACHABLE" = 1 ] || die "the repo couldn't be reached, so it can't be cloned. Nothing was changed."
 		MODE=clone
 	else
 		MODE=move
@@ -341,14 +459,10 @@ else
 fi
 
 # Windows can't move a folder that a terminal is in
-if [ "$MODE" = move ]; then
+if [ "$MODE" = move ] && is_windows; then
 	case "$START_DIR/" in
 		"$MOVE_FROM"/*)
-			case "$(uname -s)" in
-				MINGW* | MSYS* | CYGWIN*)
-					die "this terminal is inside $(pretty_path "$MOVE_FROM"), and Windows can't move a folder that's in use. cd out of it, then run this again."
-					;;
-			esac
+			die "this terminal is inside $(pretty_path "$MOVE_FROM"), and Windows can't move a folder that's in use. cd out of it, then run this again."
 			;;
 	esac
 fi
@@ -369,6 +483,23 @@ else
 fi
 
 heading "Settings"
+
+# Inside this dotfiles repo, personal settings go in ~/.shell_local, which loads after wt does
+IN_DOTFILES=0
+if [ -n "${DOTFILES:-}" ] && same_dir "$DOTFILES/git/wt" "$WT_DIR"; then
+	IN_DOTFILES=1
+	default_file="$HOME/.shell_local"
+else
+	case "${SHELL##*/}" in
+		zsh) default_file="$HOME/.zshrc" ;;
+		bash) default_file="$HOME/.bashrc" ;;
+		*) default_file="" ;;
+	esac
+fi
+[ "$IN_DOTFILES" = 1 ] && say "These dotfiles load wt already, so the command goes in ~/.shell_local."
+ask_required startup "Startup file to add the command to" "$(pretty_path "$default_file")"
+STARTUP_FILE="$(full_path "$startup")"
+
 default_command="$(printf '%s' "$REPO_NAME-wt" | tr -c 'A-Za-z0-9_\n-' '-')"
 while :; do
 	ask_required COMMAND_NAME "Name for this repo's wt command" "$default_command"
@@ -388,10 +519,22 @@ while :; do
 			continue
 			;;
 	esac
+	# This script runs in a fresh bash, which can't see the user's aliases and functions, so look
+	# for them in the startup file itself
+	if existing="$(defined_in "$STARTUP_FILE" "$COMMAND_NAME")"; then
+		say "  $(pretty_path "$STARTUP_FILE") already defines $COMMAND_NAME, on $existing"
+		say "  Choose another name, or remove that from $(pretty_path "$STARTUP_FILE") and run this again."
+		continue
+	fi
 	break
 done
 
-ask_required DEV_BRANCH "Branch that new branches start from" "${detected_branch:-main}"
+while :; do
+	ask_required DEV_BRANCH "Branch that new branches start from" "${detected_branch:-main}"
+	branch_exists "$DEV_BRANCH" && break
+	say "  The repo has no branch called $DEV_BRANCH."
+	ask_yes_no "Use it anyway?" n && break
+done
 
 suggest_shared=""
 if [ "$MODE" != clone ]; then
@@ -403,22 +546,6 @@ say "Files or folders that every branch folder should share with main, rather th
 say "its own copy of (like .env). node_modules is always shared. Type - for none."
 ask SHARED "Shared files, separated by spaces" "${suggest_shared:--}"
 [ "$SHARED" = - ] && SHARED=""
-
-# Inside this dotfiles repo, personal settings go in ~/.shell_local, which loads after wt does
-IN_DOTFILES=0
-if [ -n "${DOTFILES:-}" ] && same_dir "$DOTFILES/git/wt" "$WT_DIR"; then
-	IN_DOTFILES=1
-	default_file="$HOME/.shell_local"
-else
-	case "${SHELL##*/}" in
-		zsh) default_file="$HOME/.zshrc" ;;
-		bash) default_file="$HOME/.bashrc" ;;
-		*) default_file="" ;;
-	esac
-fi
-[ "$IN_DOTFILES" = 1 ] && say "These dotfiles load wt already, so the command goes in ~/.shell_local."
-ask_required startup "Startup file to add the command to" "$(pretty_path "$default_file")"
-STARTUP_FILE="$(full_path "$startup")"
 
 #   -------------------------------
 #   PLAN
@@ -438,9 +565,24 @@ command_block+='	wt "$@"'$'\n''}'
 # Load wt, unless the dotfiles do it or the file already does
 load_block=""
 if [ "$IN_DOTFILES" = 0 ]; then
-	if has_block "$STARTUP_FILE" load || ! { [ -f "$STARTUP_FILE" ] && grep -qF "/wt.sh" "$STARTUP_FILE"; }; then
+	if has_block "$STARTUP_FILE" load || ! loads_wt "$STARTUP_FILE"; then
 		load_block=". $(quoted "$WT_DIR/wt.sh")"
 	fi
+fi
+
+# macOS Terminal and Git Bash open login shells, which read ~/.bash_profile (or ~/.bash_login, or
+# ~/.profile) and not ~/.bashrc, so make sure that file loads ~/.bashrc
+LOGIN_FILE=""
+login_block=""
+if [ "$IN_DOTFILES" = 0 ] && [ "$STARTUP_FILE" = "$HOME/.bashrc" ]; then
+	case "$(os_name)" in
+		Darwin* | MINGW* | MSYS* | CYGWIN*)
+			LOGIN_FILE="$(bash_login_file)"
+			if has_block "$LOGIN_FILE" load-bashrc || ! loads_bashrc "$LOGIN_FILE"; then
+				login_block='[ -f "$HOME/.bashrc" ] && . "$HOME/.bashrc"'
+			fi
+			;;
+	esac
 fi
 
 heading "Plan"
@@ -457,6 +599,11 @@ fi
 [ -n "$load_block" ] && printf '%s\n' "$load_block" | sed 's/^/     /'
 printf '%s\n' "$command_block" | sed 's/^/     /'
 [ -f "$STARTUP_FILE" ] && say "   (backing it up first)"
+if [ -n "$login_block" ]; then
+	say "3. Add this to $(pretty_path "$LOGIN_FILE"), so new terminals (login shells) load ~/.bashrc:"
+	printf '%s\n' "$login_block" | sed 's/^/     /'
+	[ -f "$LOGIN_FILE" ] && say "   (backing it up first)"
+fi
 
 if [ "$DRY_RUN" = 1 ]; then
 	say ""
@@ -500,18 +647,31 @@ case "$MODE" in
 		fi
 		say "Moved the clone to $(pretty_path "$MAIN")"
 		# Reconnect any worktrees made from the clone before it moved
-		git -C "$MAIN" worktree repair >/dev/null 2>&1
+		if ! repair_output="$(git -C "$MAIN" worktree repair 2>&1)"; then
+			say "Couldn't reconnect some worktrees made from this clone before it moved:"
+			printf '%s\n' "$repair_output" | sed 's/^/  /'
+			say "To fix one, run: git -C $(quoted "$MAIN") worktree repair <its folder>"
+		fi
 		;;
 esac
 
+# backup <file>: Copy the file aside before changing it
+backup() {
+	local copy="$1.wt-setup-$(date +%Y%m%d-%H%M%S).bak"
+	[ -f "$1" ] || return 0
+	cp "$1" "$copy" || die "couldn't back up $(pretty_path "$1"), so it wasn't changed."
+	say "Backed up $(pretty_path "$1") to $(pretty_path "$copy")"
+}
+
 mkdir -p "$(dirname "$STARTUP_FILE")"
-if [ -f "$STARTUP_FILE" ]; then
-	backup="$STARTUP_FILE.wt-setup-$(date +%Y%m%d-%H%M%S).bak"
-	cp "$STARTUP_FILE" "$backup" || die "couldn't back up $(pretty_path "$STARTUP_FILE"), so it wasn't changed."
-	say "Backed up $(pretty_path "$STARTUP_FILE") to $(pretty_path "$backup")"
-fi
+backup "$STARTUP_FILE"
 [ -n "$load_block" ] && { set_block "$STARTUP_FILE" load "$load_block" || die "couldn't update $(pretty_path "$STARTUP_FILE")."; }
 set_block "$STARTUP_FILE" "$COMMAND_NAME" "$command_block" || die "couldn't update $(pretty_path "$STARTUP_FILE")."
+if [ -n "$login_block" ]; then
+	backup "$LOGIN_FILE"
+	set_block "$LOGIN_FILE" load-bashrc "$login_block" || die "couldn't update $(pretty_path "$LOGIN_FILE")."
+	say "Made $(pretty_path "$LOGIN_FILE") load ~/.bashrc"
+fi
 say "Added the $COMMAND_NAME command to $(pretty_path "$STARTUP_FILE")"
 
 heading "Done"

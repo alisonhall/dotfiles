@@ -76,16 +76,17 @@ bash "<wt-folder>/wt-setup.sh"
 
 Once `wt` is loaded, `wt setup` runs it too. It asks:
 
-1. **Which repo:** its GitHub `<repo-owner>/<repo-name>`, or a URL to clone. If you run it from inside a clone, it offers that repo.
+1. **Which repo:** its GitHub `<repo-owner>/<repo-name>`, or a URL to clone. If you run it from inside a clone, it offers that repo. It checks that it can reach the repo before going on.
 2. **Which folder to keep it in** (`<repo-location>`), and how to get the clone into `<repo-location>/main`: clone it from GitHub, or move a clone you already have. If `<repo-location>/main` is already a clone, it uses that.
-3. **A name for the repo's command** (`<command-name>`), the branch new branches start from, and any files to [share between branch folders](#shared-files-node_modules-env).
-4. **Which startup file to add the command to.** It suggests `~/.zshrc` or `~/.bashrc`, depending on your shell.
+3. **Which startup file to add the command to.** It suggests `~/.zshrc` or `~/.bashrc`, depending on your shell.
+4. **A name for the repo's command** (`<command-name>`), the branch new branches start from, and any files to [share between branch folders](#shared-files-node_modules-env). It won't use a name that's already a command, or that the startup file already has an alias or function for.
 
-Every question has a default, shown in `[brackets]`, so you can press Enter to accept it. Then it shows exactly what it will do and asks before doing it. It backs up the startup file, then:
+Every question has a default, shown in `[brackets]`, so you can press Enter to accept it. Then it shows exactly what it will do and asks before doing it. It backs up each file before changing it, then:
 
-- clones or moves the repo into `<repo-location>/main`
+- clones or moves the repo into `<repo-location>/main`, and reconnects any worktrees you'd already made from a clone it moves
 - adds a line that loads `wt`, unless the file loads it already
 - adds the repo's command, between `# >>> wt: <command-name> >>>` and `# <<< wt: <command-name> <<<` lines
+- on macOS and Windows, if you use bash, makes `~/.bash_profile` load `~/.bashrc` if it doesn't already. New terminals there read `~/.bash_profile`, not `~/.bashrc`
 
 Running it again for the same command replaces that command's block, so add any settings it didn't ask about again afterwards. To see what it would do without changing anything, run it with `--dry-run`.
 
