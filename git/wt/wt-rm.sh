@@ -16,6 +16,11 @@ if [ -z "$REMOTE_BRANCH_NAME" ]; then
 	exit 1
 fi
 
+# remove_links
+source "$(cd "$(dirname "$0")" && pwd)/wt-common.sh"
+
+# Links first, so nothing they point at (like main/node_modules) can be deleted with the folder
+remove_links "$WT_WORKTREE_REPO_LOCATION/$LOCAL_BRANCH_NAME"
 rm -rd "$WT_WORKTREE_REPO_LOCATION/$LOCAL_BRANCH_NAME"
 echo "Worktree folder $LOCAL_BRANCH_NAME removed."
 # Anchor the prune on the main worktree: the collection folder is not a git

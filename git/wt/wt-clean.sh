@@ -144,6 +144,9 @@ gh auth status >/dev/null 2>&1 || { echo "gh is not authenticated. Run: gh auth 
 git -C "$MAIN_WT" fetch --prune "$REMOTE_NAME" --quiet || echo "warn: fetch failed, using cached refs" >&2
 
 # --- helpers -----------------------------------------------------------------
+# remove_links
+source "$(cd "$(dirname "$0")" && pwd)/wt-common.sh"
+
 is_protected() {
   local name="$1" p
   for p in "${PROTECTED[@]}"; do [[ "$name" == "$p" ]] && return 0; done
@@ -376,16 +379,18 @@ while IFS=$'\t' read -r path branch <&3; do
   # Safe to remove.
   if (( APPLY )); then
     # --force is safe here: gate 5 already guarantees the only untracked items
-    # left are symlinks (e.g. node_modules), which --force discards without
-    # touching the real files they point at. Tracked changes and stashes are
-    # already blocked by gates 5 and 6.
+    # left are links (e.g. node_modules) and build artifacts. Tracked changes
+    # and stashes are already blocked by gates 5 and 6. The links are deleted
+    # first, because on Windows `git worktree remove` follows junctions and
+    # would delete what's inside the folders they point to (main/node_modules).
+    remove_links "$path"
     if git -C "$MAIN_WT" worktree remove --force "$path"; then
       if (( ! KEEP_BRANCH )); then
         git -C "$MAIN_WT" branch -D "$branch" >/dev/null 2>&1 || true
       fi
       printf 'GONE  %-60s [%s] removed\n' "$name" "$branch"
     else
-      printf 'KEEP  %-60s [%s] -> worktree remove refused (dirty?)\n' "$name" "$branch"
+      printf 'KEEP  %-60s [%s] -> worktree remove refused (dirty?). Run wt link %s to restore its links\n' "$name" "$branch" "$branch"
       ((kept++)) || true
       continue
     fi
