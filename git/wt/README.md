@@ -300,6 +300,7 @@ In a JavaScript monorepo with npm or yarn `workspaces`, the shared `node_modules
 
 - **Shared links:** Windows only allows ordinary symlinks with Developer Mode turned on, and Git Bash copies files instead of linking them otherwise. So without Developer Mode, `wt` shares folders (like `node_modules`) through *junctions*, and files (like `.env`) through *hard links*. Neither needs admin rights. A hard link stops being shared if an editor saves the file by replacing it; `wt link --check` reports that, and you can delete the branch folder's copy and run `wt link` again. With Developer Mode on, `wt` makes ordinary symlinks.
 - **Deleting branch folders yourself:** on Windows, `git worktree remove` follows junctions and **deletes everything inside the folders they point to**, like `main/node_modules`. `wt rm` and `wt clean` delete a folder's links first, so use them. If you use `git worktree remove` directly, delete the folder's links first: `find <folder> -type l -delete`.
+- **Folders in use:** Windows can't delete a folder that a program is using, like an editor with it open or a terminal that's in it, and a delete that fails partway leaves it half deleted. `wt rm` and `wt clean` check first, and leave a folder that's in use untouched. Close the program (or `cd` out of the folder), then run them again.
 - **`wt ls`** marks every folder `[outside]`, because Git Bash writes the same folder in two forms (like `/c/Users/...` and `C:/Users/...`). The rest of its report is right.
 
 ## Uninstall

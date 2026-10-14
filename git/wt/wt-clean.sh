@@ -144,7 +144,7 @@ gh auth status >/dev/null 2>&1 || { echo "gh is not authenticated. Run: gh auth 
 git -C "$MAIN_WT" fetch --prune "$REMOTE_NAME" --quiet || echo "warn: fetch failed, using cached refs" >&2
 
 # --- helpers -----------------------------------------------------------------
-# remove_links
+# folder_in_use, remove_links
 source "$(cd "$(dirname "$0")" && pwd)/wt-common.sh"
 
 is_protected() {
@@ -379,6 +379,12 @@ while IFS=$'\t' read -r path branch <&3; do
   fi
 
   # Safe to remove.
+  if (( APPLY )) && folder_in_use "$path"; then
+    # Windows can't delete a folder a program is using, and would leave it half deleted
+    printf 'KEEP  %-60s [%s] -> in use by another program (an editor, or a terminal in it); close it and run this again\n' "$name" "$branch"
+    ((kept++)) || true
+    continue
+  fi
   if (( APPLY )); then
     # --force is safe here: gate 5 already guarantees the only untracked items
     # left are links (e.g. node_modules) and build artifacts. Tracked changes

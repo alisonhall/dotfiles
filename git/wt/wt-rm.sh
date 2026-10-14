@@ -16,8 +16,18 @@ if [ -z "$REMOTE_BRANCH_NAME" ]; then
 	exit 1
 fi
 
-# remove_links
+# folder_in_use, remove_links
 source "$(cd "$(dirname "$0")" && pwd)/wt-common.sh"
+
+if [ ! -d "$WT_WORKTREE_REPO_LOCATION/$LOCAL_BRANCH_NAME" ]; then
+	echo "wt-rm: there's no folder $LOCAL_BRANCH_NAME in $WT_WORKTREE_REPO_LOCATION."
+	exit 1
+fi
+if folder_in_use "$WT_WORKTREE_REPO_LOCATION/$LOCAL_BRANCH_NAME"; then
+	echo "wt-rm: $LOCAL_BRANCH_NAME is in use by another program, like an editor or a terminal that's in it."
+	echo "       Close it (or cd out of the folder), then run this again. Nothing was deleted."
+	exit 1
+fi
 
 # Links first, so nothing they point at (like main/node_modules) can be deleted with the folder
 remove_links "$WT_WORKTREE_REPO_LOCATION/$LOCAL_BRANCH_NAME"
