@@ -102,6 +102,16 @@ remove-temp-worktree () {
 	git worktree remove ../temporary-worktree
 }
 
+# wt: git worktree manager (bin/wt/) for a collection of worktrees checked out
+# side by side. Project/user-agnostic - it reads WT_* env vars instead of
+# hardcoding anything. There are no shared WT_* defaults here: each repo you
+# manage worktrees for gets its own alias in ~/.shell_local that passes its
+# WT_* values to the `wt` function, e.g.:
+#   alias my-repo-wt="WT_WORKTREE_REPO_LOCATION=\$HOME/Sites/my-repo-worktrees WT_REPO_SLUG=owner/repo wt"
+# `wt help` lists every command and all the WT_* variables.
+WT_DIR="$DOTFILES/bin/wt"
+[ -f "$WT_DIR/wt.sh" ] && . "$WT_DIR/wt.sh"
+
 #   ---------------------------------------
 #   GIT ALIAS COMPLETIONS
 #   ---------------------------------------
@@ -115,3 +125,34 @@ _git_m () { _git_merge; }
 _git_log-branch () { _git_branch; }
 _git_rename-remote-branch () { _git_branch; }
 _git_rename-local-and-remote-branch () { _git_branch; }
+
+# zsh's native `_git` dispatches a `!` shell-function alias's argument to a
+# `_git-<alias>` (dash) function, via `compdef`. Bash has no `compdef`, so this
+# block only runs under zsh, even though this file is also loaded by bash.
+if [ -n "$ZSH_VERSION" ]; then
+	compdef _git g=git
+
+	# Branch-name completion (arg = local branch)
+	_git-bclean () { __git_branch_names; }
+	_git-m () { __git_branch_names; }
+	_git-log-branch () { __git_branch_names; }
+	_git-rename-remote-branch () { __git_branch_names; }
+	_git-rename-local-and-remote-branch () { __git_branch_names; }
+	_git-f () { __git_branch_names; }
+	_git-commit-changes () { __git_branch_names; }
+	_git-delete-merged-local-branches () { __git_branch_names; }
+	_git-differences-in-commits-between-branches () { __git_branch_names; }
+
+	# Revision completion (arg = branch OR commit)
+	_git-commit-compare () { __git_revisions; }
+	_git-differences-in-commits-between-branches3 () { __git_revisions; }
+
+	# Commit/SHA completion (arg = commit)
+	_git-current-branch-contains-commit () { __git_commits; }
+	_git-undo-pushed-merge () { __git_commits; }
+
+	# Stash completion (arg = stash index, stash@{N})
+	_git-shs () { __git_stashes; }
+	_git-shd () { __git_stashes; }
+	_git-sha () { __git_stashes; }
+fi

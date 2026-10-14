@@ -48,6 +48,7 @@ The installer doesn't replace your existing config files. It:
 | Git | `git/gitconfig`, `git/gitignore_global` | `~/.gitconfig` (below the include) |
 | Prompt (zsh) | `config/p10k.zsh` | `~/.p10k.zsh`, if present, is used instead |
 | iTerm (macOS) | `config/iterm/` | |
+| VS Code | `config/vscode/` (not applied automatically - see below) | |
 | Scripts | `bin/` (added to `PATH`) | |
 
 Put anything personal, work-specific or specific to one computer in the local files, such as emails, server addresses or tool paths. They load after the shared files, so they override them.
@@ -65,9 +66,20 @@ Run `showa <text>` to find where an alias or function is defined.
 
 Tools that edit your shell config themselves (conda, nvm and similar) write to `~/.zshrc` / `~/.bashrc` and not to this repo, which is what you want.
 
+### VS Code
+
+Unlike the shell and git config, `config/vscode/` isn't linked in automatically by `install.sh`. It's a reference copy of portable editor settings and snippets:
+
+| File | Contents |
+| --- | --- |
+| `config/vscode/settings.json` | User settings: formatter/ESLint/import-organizing on save, GitLens graph options, Jest run mode |
+| `config/vscode/global.code-snippets` | Global snippets (JS/TS/React scaffolding) |
+
+To use them, copy or symlink `config/vscode/settings.json` to VS Code's user `settings.json` (`code --locate-shell-integration-path` or Cmd+Shift+P → "Preferences: Open User Settings (JSON)" shows the path), and `config/vscode/global.code-snippets` into the same folder's `snippets/`. Merge rather than overwrite if you already have machine- or work-specific settings there.
+
 ## Scripts
 
-Everything in `bin/` is on your `PATH`.
+Everything in `bin/` is on your `PATH`. `bin/wt/` is a git worktree manager (see `wt help` once a shell has loaded this repo); configure it per-repo with a `WT_*`-exporting alias in `~/.shell_local` (`wt help` documents the variables).
 
 | Script | What it does |
 | --- | --- |
@@ -75,6 +87,7 @@ Everything in `bin/` is on your `PATH`.
 | `timestamps.sh` | Common `date` formats, with their output right now |
 | `format-git-objects.sh` | Source it to get `$allFormatOptions`, a list of every `git for-each-ref --format` field |
 | `git-branch-status` | How far each branch is ahead of or behind its upstream ([upstream project](https://github.com/bill-auger/git-branch-status), GPLv3) |
+| `branch-status.sh` | Richer branch status report: remote/PR state (via `gh`), worktree awareness, and squash-merge-aware "in base" detection. Run via the `branch-status` git alias |
 | `remove-merged-branches` | Delete local branches merged into the current one, after you review the list |
 | `screenshots-of-urls` | Screenshot a page at several widths with Firefox: `screenshots-of-urls <url> [folder] [widths...]` |
 | `createpdf.sh`, `createallpdfs.sh` | Make a PDF from the images in a folder (or each subfolder). Needs ImageMagick and exiftool |

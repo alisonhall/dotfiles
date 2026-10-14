@@ -62,6 +62,52 @@ alias node-version='node -v'
 alias nvm-current-version='nvm current'
 
 #   ---------------------------------------
+#   JAVA
+#   ---------------------------------------
+
+# verify-jar-file-version <dir> <expected-filename>: Check that the highest-versioned
+# .jar in <dir> is named <expected-filename> (e.g. after a Maven build)
+verify-jar-file-version () {
+	local jar_dir="$1" expected_name="$2" highest_version_jar actual_name
+	highest_version_jar=$(ls "$jar_dir"/*.jar 2>/dev/null | sort -V | tail -n 1)
+
+	if [ -z "$highest_version_jar" ]; then
+		echo "No .jar files found in directory: $jar_dir"
+		return 1
+	fi
+
+	actual_name=$(basename "$highest_version_jar")
+	if [ "$actual_name" = "$expected_name" ]; then
+		echo "Jar file name match successful: $actual_name"
+	else
+		echo "Jar file name mismatch: expected $expected_name, but found $actual_name"
+		return 1
+	fi
+}
+
+#   ---------------------------------------
+#   AZURE
+#   ---------------------------------------
+
+# ensure-azure-login: Log in to the Azure CLI if not already logged in, or if the access token expired
+ensure-azure-login () {
+	if ! az account show &> /dev/null; then
+		echo "Not logged in to Azure CLI. Initiating login..."
+		az login
+		return
+	fi
+	local expiry now
+	expiry=$(az account get-access-token --query "expiresOn" -o tsv)
+	now=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+	if [[ "$now" > "$expiry" ]]; then
+		echo "Azure CLI access token has expired. Initiating login..."
+		az login
+	else
+		echo "Already logged in to Azure CLI with a valid access token."
+	fi
+}
+
+#   ---------------------------------------
 #   WEB DEVELOPMENT
 #   ---------------------------------------
 
