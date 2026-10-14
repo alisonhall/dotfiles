@@ -1,138 +1,256 @@
 # wt: a git worktree manager
 
-`wt` keeps one folder per branch, side by side, so you can switch branches by changing folders instead of stashing and checking out:
+A git worktree is an extra folder for the same repo, with a different branch checked out. `wt` keeps one of these folders per branch, side by side, so you can switch branches by changing folders instead of stashing and checking out:
 
-```
-~/code/my-repo/          <- the "collection" folder
-├── main/                <- the main worktree (a normal clone)
-├── feature_login/       <- branch feature/login
-└── fix_TICKET-12_typo/  <- branch fix/TICKET-12/typo
+```text
+~/code/shop/              <- one folder for the repo
+├── main/                 <- branch main
+├── feature_login/        <- branch feature/login
+└── fix_TICKET-12_typo/   <- branch fix/TICKET-12/typo
 ```
 
-`wt add <branch>` creates a worktree for a branch and moves you into it, `wt ls` shows the state of every worktree, and `wt clean` removes the ones whose PRs are finished. Folder names are the branch name with `/` replaced by `_`.
+`wt add <branch>` makes a folder for a branch and moves you into it, `wt ls` shows the state of every folder, and `wt clean` deletes the ones whose pull requests are finished.
 
 These scripts are part of [github.com/alisonhall/dotfiles](https://github.com/alisonhall/dotfiles), but don't depend on anything else in it. You can download just this folder.
 
 ## Requirements
 
-| | Needed for |
-| --- | --- |
-| bash, git | Everything. Your interactive shell can be bash or zsh |
-| [gh](https://cli.github.com), logged in (`gh auth login`) | `wt clean` (required). Optional for `wt add`/`wt cd`, to recover a branch whose PR was squash-merged and deleted |
-| node 14.18 or later | Optional. Only for monorepos with npm/yarn workspaces (see [Node projects](#node-projects)) |
+**You need:**
 
-Written for macOS and Linux. It also runs in Git Bash on Windows, with [some limits](#windows).
+- **bash and git.** The scripts run in bash. The terminal you type in can use bash or zsh.
+- **A repo hosted on GitHub.**
+- **The GitHub CLI, `gh`, logged in to GitHub.** Install it from [cli.github.com](https://cli.github.com), then run `gh auth login` once. `wt clean` uses it to see which pull requests are merged, and won't run without it. `wt add` and `wt cd` use it to bring back a branch that was deleted from GitHub after its pull request was merged.
+
+**Only if your repo is a JavaScript monorepo with npm or yarn workspaces:**
+
+- **Node.js 14.18 or later.** See [Node projects](#node-projects).
+
+`wt` is written for macOS and Linux. It also runs in Git Bash on Windows, with [some limits](#windows).
 
 ## Install
 
 ### 1. Download the scripts
 
-Either download this folder once:
+Put the `wt` folder anywhere you like. The commands below use `~/tools/wt` as an example, so change that to the folder you want. Choose one way to download:
+
+**Without the command line:** on [the repo's GitHub page](https://github.com/alisonhall/dotfiles), click **Code**, then **Download ZIP**. Unzip it, and move the `git/wt` folder inside it to wherever you want to keep it.
+
+**With curl:** downloads only the `wt` folder.
 
 ```sh
-mkdir -p ~/.local/share/wt
+dest="$HOME/tools/wt"    # change this to any folder you like
+mkdir -p "$dest"
 curl -fsSL https://github.com/alisonhall/dotfiles/archive/refs/heads/main.tar.gz |
-	tar -xz --strip-components=3 -C ~/.local/share/wt dotfiles-main/git/wt
+    tar -xz --strip-components=3 -C "$dest" dotfiles-main/git/wt
 ```
 
-Or clone just this folder with git, so you can update it later with `git -C ~/.local/share/wt-repo pull`:
+**With git:** you can update it later with `git pull`. The `wt` scripts end up in a `git/wt` folder inside the folder you clone into.
 
 ```sh
-git clone --depth 1 --filter=blob:none --sparse https://github.com/alisonhall/dotfiles.git ~/.local/share/wt-repo
-git -C ~/.local/share/wt-repo sparse-checkout set git/wt
+dest="$HOME/tools/dotfiles"    # change this to any folder you like
+git clone --depth 1 --filter=blob:none --sparse https://github.com/alisonhall/dotfiles.git "$dest"
+git -C "$dest" sparse-checkout set git/wt
+# The scripts are now in $dest/git/wt. To update them later: git -C "$dest" pull
 ```
 
-The scripts are then in `~/.local/share/wt-repo/git/wt` instead of `~/.local/share/wt`. Use that path in the next step.
+### 2. Load `wt` in your terminal
 
-### 2. Load `wt` in your shell
+Your terminal runs a startup file each time it opens. Which one depends on your shell:
 
-Add this to `~/.zshrc` or `~/.bashrc`:
+| Your shell | Usually on | Startup file |
+| --- | --- | --- |
+| zsh | macOS | `~/.zshrc` |
+| bash | Linux, Git Bash on Windows | `~/.bashrc` |
+
+Not sure which shell you use? Run `echo $SHELL`.
+
+Add this line to that file, using the folder from step 1:
 
 ```sh
-. ~/.local/share/wt/wt.sh
+. "$HOME/tools/wt/wt.sh"
 ```
 
-This defines a `wt` shell function. It has to be a function rather than a script on your `PATH`, because a script can't change your shell's current folder, and `wt add`, `wt cd` and `wt main` do.
+Open a new terminal and run `wt help`. If it lists the commands, `wt` is loaded.
+
+`wt` is loaded this way, as a shell function, rather than run as a script, because a script can't change your terminal's current folder, and `wt add`, `wt cd` and `wt main` do.
 
 ### 3. Tell `wt` where your repo is
 
-`wt` reads its settings from environment variables, so it can manage several repos. Give each repo an alias in the same file:
+`wt` reads its settings from environment variables, so one copy can work with several repos. The easiest way to set them is to make your own command for each repo. Add a line like this to the same startup file as in step 2 (`~/.zshrc` or `~/.bashrc`):
 
 ```sh
-alias my-repo-wt='WT_WORKTREE_REPO_LOCATION="$HOME/code/my-repo" WT_REPO_SLUG=owner/my-repo wt'
+alias shop-wt='WT_WORKTREE_REPO_LOCATION="$HOME/code/shop" WT_REPO_SLUG=acme/shop wt'
 ```
 
-Then use `my-repo-wt ls`, `my-repo-wt add feature/login` and so on. If you only use `wt` with one repo, you can `export` the variables instead and run `wt` directly.
+| Part | What it is |
+| --- | --- |
+| `shop-wt` | The name of your new command. It's only an example; pick any name that isn't already a command, like `swt` or `shop`. |
+| `WT_WORKTREE_REPO_LOCATION="$HOME/code/shop"` | The repo's folder, which you'll set up in step 4. |
+| `WT_REPO_SLUG=acme/shop` | The repo's owner and name, as in its GitHub URL: `github.com/acme/shop` → `acme/shop`. |
+| `wt` | Runs `wt` with those settings. They apply only to this command, not to the rest of your terminal. |
 
-### 4. Set up the collection folder
+Open a new terminal, then use your command in place of `wt`: `shop-wt add feature/login`, `shop-wt ls` and so on. For another repo, add another line with a different name and values.
 
-`wt` expects the main worktree to be a folder named `main` inside the collection folder, even if your default branch has another name. For a fresh start:
+If you only use `wt` with one repo, you can set the variables for every command instead, and type `wt` itself:
 
 ```sh
-mkdir -p ~/code/my-repo
-git clone git@github.com:owner/my-repo.git ~/code/my-repo/main
+export WT_WORKTREE_REPO_LOCATION="$HOME/code/shop"
+export WT_REPO_SLUG=acme/shop
 ```
 
-To use a clone you already have, move it to `<collection folder>/main`. A bare-repo layout (`my-repo/.bare` with a `my-repo/main` worktree) also works.
+[Settings](#settings) lists the other variables you can set the same way.
 
-Open a new terminal and run `wt help` to check it's loaded.
+### 4. Set up the repo's folder
+
+`wt` needs the repo in a particular shape: one folder for the repo (the "collection folder"), with a normal clone of the repo inside it in a folder named `main`. `wt` adds a folder next to `main` for each branch you work on.
+
+```text
+~/code/shop/               <- the collection folder. WT_WORKTREE_REPO_LOCATION points here.
+│                             It isn't a git repo itself; it just holds the folders below.
+│
+├── main/                  <- a normal clone of the repo. It must be named "main".
+│   ├── .git/              <- the repo's git data: its history, branches and settings
+│   ├── package.json
+│   └── ...
+│
+├── feature_login/         <- made by `wt add feature/login`
+│   ├── .git               <- a small file that points back to main/.git
+│   ├── package.json       <- the same files, as they are on feature/login
+│   └── ...
+│
+└── fix_typo/              <- made by `wt add fix/typo`
+```
+
+Every folder shares the git data in `main/.git`, so a commit made in one folder is visible from all of them, and there's only one copy of the history to fetch:
+
+```mermaid
+flowchart LR
+    github[("GitHub<br>acme/shop")] <-- "fetch, push" --> data[("main/.git<br>the repo's git data")]
+    data --- main["main/<br>branch main"]
+    data --- login["feature_login/<br>branch feature/login"]
+    data --- typo["fix_typo/<br>branch fix/typo"]
+```
+
+Folder names are the branch name with each `/` changed to `_`, because `/` would make nested folders.
+
+**To start with a fresh clone:**
+
+```sh
+mkdir -p ~/code/shop
+git clone git@github.com:acme/shop.git ~/code/shop/main
+```
+
+**To use a clone you already have** at `~/code/shop`, move it down a level into `main`:
+
+```sh
+mv ~/code/shop ~/code/shop-main
+mkdir ~/code/shop
+mv ~/code/shop-main ~/code/shop/main
+git -C ~/code/shop/main worktree repair    # reconnects any worktrees you made before
+```
+
+**Common mistakes:**
+
+| | Layout | Why it doesn't work |
+| --- | --- | --- |
+| ❌ | The clone is `~/code/shop` itself, with no `main` folder | `wt` looks for the clone in `~/code/shop/main` |
+| ❌ | `WT_WORKTREE_REPO_LOCATION="$HOME/code/shop/main"` | Point it at the collection folder, `~/code/shop`, not at `main` |
+| ❌ | The clone is in `~/code/shop/develop` because the default branch is `develop` | The folder must be named `main`, whatever its branch. Set `CURRENT_DEV_BRANCH=develop` (see [Settings](#settings)) so new branches start from `develop` |
+| ✅ | `~/code/shop/main` is a clone, and `WT_WORKTREE_REPO_LOCATION="$HOME/code/shop"` | |
+
+#### The bare-repo layout
+
+Some people set up worktrees differently, with a "bare" repo. A bare repo is only git's data (what's normally in a `.git` folder), with no files checked out. In this layout the bare repo sits in a hidden `.bare` folder, and every branch, including `main`, is a worktree that points to it:
+
+```text
+~/code/shop/
+├── .bare/          <- a bare repo: the git data, and no files
+├── main/           <- a worktree, like every other branch folder
+│   └── .git        <- a small file that points to ../.bare
+└── feature_login/
+    └── .git        <- also points to ../.bare
+```
+
+`wt` works with this layout too, so if you already use it, there's nothing to change. If you're starting fresh, use the normal clone above: `git clone --bare` doesn't connect each branch to its GitHub branch, so `wt ls` can't show how far ahead or behind they are until you set that up yourself.
 
 ## Commands
 
-| Command | What it does |
-| --- | --- |
-| `wt add <branch>` | Creates a worktree for the branch and moves into it. Tracks the remote branch if it exists; otherwise creates a new branch from `CURRENT_DEV_BRANCH` (`main` by default). If the folder already exists, just moves into it |
-| `wt cd <branch>` | Moves into the branch's worktree and fetches its remote branch (it doesn't merge or pull). Runs `wt add` first if the worktree doesn't exist |
-| `wt main` | Moves into the main worktree |
-| `wt ls [--no-fetch]` | For every worktree: its branch, whether its remote branch still exists, uncommitted and untracked changes, and how far ahead/behind it is. Read-only. `--no-fetch` skips the `git fetch` and works offline |
-| `wt clean [--apply] [--keep-branch] [--older-than 30d]` | Removes worktrees whose PRs are closed or merged. A dry run unless you pass `--apply`. See [what `wt clean` keeps](#what-wt-clean-keeps) |
-| `wt rm <branch>` | Deletes the branch's worktree folder and prunes git's record of it. **This doesn't check anything first**: uncommitted changes in that folder are lost. `wt clean` is the safe way to tidy up |
-| `wt link [<branch> \| --all] [--check] [--no-workspaces]` | Checks and repairs a worktree's symlinks to `main` (see [Shared files](#shared-files-node_modules-env)) |
-| `wt help` | Lists the commands and settings |
+The examples use `wt`. If you made your own command in [step 3](#3-tell-wt-where-your-repo-is), like `shop-wt`, type that instead.
 
-`wt add` and `wt cd` take the branch name as it is on the remote (`feature/login`), not the folder name.
+`<branch>` is always the branch's name as it is on GitHub, like `feature/login`, not its folder name.
+
+| Command | What it does | Options |
+| --- | --- | --- |
+| `wt add <branch>` | Creates a folder for `<branch>` in the collection folder (for `feature/login`, that's `feature_login/`), and moves your terminal into it. If `<branch>` exists on GitHub, the folder tracks it. If not, `wt` creates `<branch>` as a new branch from `main` (or from `CURRENT_DEV_BRANCH`). If the folder already exists, `wt` just moves you into it. | |
+| `wt cd <branch>` | Moves your terminal into `<branch>`'s folder, and downloads the branch's latest commits from GitHub without changing your files (run `git pull` to apply them). If the folder doesn't exist yet, `wt cd` creates it first, the same way `wt add` does. | |
+| `wt main` | Moves your terminal into the `main` folder. | |
+| `wt ls` | Lists every branch folder with its branch, whether that branch still exists on GitHub, whether the folder has uncommitted or untracked changes, and how many commits the branch is ahead of or behind GitHub. Changes nothing. | `--no-fetch`: skip checking GitHub first. Faster, and works offline, but the ahead/behind numbers may be out of date |
+| `wt clean` | Lists the branch folders that are safe to delete: their pull request is merged or closed, and they have no work that isn't on GitHub. Deletes nothing unless you add `--apply`. See [what `wt clean` keeps](#what-wt-clean-keeps). | `--apply`: delete those folders and their local branches<br>`--keep-branch`: with `--apply`, delete the folders but keep the local branches<br>`--older-than 30d`: only folders whose last commit is older than 30 days (also `12h`, `4w`, `90m` for minutes) |
+| `wt rm <branch>` | Deletes `<branch>`'s folder right away. **It doesn't check for uncommitted changes, so anything in that folder that isn't committed is lost.** The branch itself is kept. `wt clean` is the safe way to tidy up. | |
+| `wt link <branch>`<br>`wt link --all` | Checks that a branch folder's shared links (to `node_modules`, and to anything in `WT_SYMLINK_PAIRS`) point into `main`, and repairs any that are missing or broken. Give one branch, or `--all` for every branch folder. See [Shared files](#shared-files-node_modules-env). | `--check`: report problems, but don't repair them<br>`--no-workspaces`: skip the [Node workspace](#node-projects) links (faster) |
+| `wt help` | Lists the commands, options and settings. | |
 
 ### What `wt clean` keeps
 
-`wt clean` checks the PR state with `gh`, because squash merges leave nothing in git's history that shows a branch was merged. It only removes a worktree when all of these are true:
+`wt clean` checks pull requests on GitHub, because a squash merge leaves nothing in git's history to show that a branch was merged. It only deletes a branch folder when all of these are true:
 
-1. Its PR is closed or merged.
-2. The branch was pushed at some point.
-3. It has no commits that aren't on the remote branch (or, once that's deleted, on the PR).
-4. It has no uncommitted changes, and no untracked or ignored files other than symlinks and build output (`node_modules`, `dist`, `build`, `coverage` and the like).
-5. It has no stashes.
+1. The branch's pull request is merged or closed.
+2. The branch was pushed to GitHub at some point.
+3. The branch has no commits that aren't on GitHub (on the branch, or in the pull request if the branch was deleted).
+4. The folder has no uncommitted changes, and no new or ignored files other than shared links and build output (`node_modules`, `dist`, `build`, `coverage` and the like).
+5. The branch has no stashes.
 
-Anything it keeps is listed with the reason. With `--apply` it also deletes the local branch, unless you pass `--keep-branch`. Branches in `WT_PROTECTED_BRANCHES` are never removed.
+`wt clean` lists every folder it keeps, with the reason. Branches in `WT_PROTECTED_BRANCHES` (`main`, unless you change it) are never deleted.
 
 ## Settings
 
-| Variable | Default | |
-| --- | --- | --- |
-| `WT_WORKTREE_REPO_LOCATION` | (required) | The collection folder, which contains `main/` |
-| `WT_REPO_SLUG` | (required for `wt clean`) | The GitHub repo, as `owner/repo` |
-| `CURRENT_DEV_BRANCH` | `main` | The branch new branches start from |
-| `CURRENT_REMOTE_NAME` | `origin` | The remote to compare against |
-| `WT_PROTECTED_BRANCHES` | `main` | Branches `wt clean` never removes, separated by spaces |
-| `WT_SAFE_ARTIFACTS` | | More files or folders that `wt clean` may delete along with a worktree, separated by spaces (e.g. `.cache bundle-analysis.html`) |
-| `WT_SYMLINK_PAIRS` | | Paths each new worktree links to the same path in `main`, separated by spaces (e.g. `.env .cache`) |
+Set these in the same place as in [step 3](#3-tell-wt-where-your-repo-is):
+
+- **For one repo:** add them to that repo's command in `~/.zshrc` or `~/.bashrc`. With several settings, a function is easier to read than an alias. It works the same way:
+
+  ```sh
+  shop-wt() {
+      WT_WORKTREE_REPO_LOCATION="$HOME/code/shop" \
+      WT_REPO_SLUG=acme/shop \
+      CURRENT_DEV_BRANCH=develop \
+      WT_SYMLINK_PAIRS=".env" \
+      wt "$@"
+  }
+  ```
+
+- **For every repo:** `export` them in `~/.zshrc` or `~/.bashrc`, for example `export CURRENT_REMOTE_NAME=upstream`. A setting in a repo's command overrides one exported for every repo.
+
+Open a new terminal after changing either file.
+
+| Setting | Needed? | Default | What it's for |
+| --- | --- | --- | --- |
+| `WT_WORKTREE_REPO_LOCATION` | Always | | The collection folder: the one that contains `main/` (see [step 4](#4-set-up-the-repos-folder)) |
+| `WT_REPO_SLUG` | For `wt clean` | | The GitHub repo's owner and name, like `acme/shop` |
+| `CURRENT_DEV_BRANCH` | No | `main` | The branch that `wt add` starts new branches from |
+| `CURRENT_REMOTE_NAME` | No | `origin` | The git remote that points at GitHub |
+| `WT_PROTECTED_BRANCHES` | No | `main` | Branches `wt clean` never deletes, separated by spaces, like `"main develop"` |
+| `WT_SAFE_ARTIFACTS` | No | | More files or folders that `wt clean` may delete along with a branch folder, separated by spaces, like `".cache bundle-analysis.html"`. Use it for generated files your repo ignores, so they don't stop a folder being cleaned |
+| `WT_SYMLINK_PAIRS` | No | | Files or folders that every branch folder should share with `main` rather than have its own copy of, separated by spaces, like `".env .cache"` (see [Shared files](#shared-files-node_modules-env)) |
 
 ## Shared files (node_modules, .env)
 
-New worktrees get a `node_modules` symlink to `main/node_modules`, so you don't have to reinstall dependencies for every branch. Add other files that should be shared rather than copied, like `.env`, to `WT_SYMLINK_PAIRS`. `wt link --check --all` shows which worktrees have missing or broken links, and `wt link --all` fixes them. It reports, but never replaces, a real file or folder in place of a link, since that may hold real content.
+Each new branch folder gets a `node_modules` link to `main/node_modules`, so you don't have to install dependencies again for every branch. To share other files or folders the same way, like `.env`, add them to `WT_SYMLINK_PAIRS`.
 
-In a repo with no `main/node_modules`, the `node_modules` link points at nothing. It's harmless, and on Windows `ln` prints an error instead.
+`wt link --check --all` shows which branch folders have missing or broken links, and `wt link --all` repairs them. If a branch folder has a real file or folder where a link should be, `wt link` reports it but leaves it alone, since it may hold work you want to keep.
+
+In a repo with no `main/node_modules`, the `node_modules` link points at nothing. That's harmless. On Windows, `ln` prints an error instead.
 
 ### Node projects
 
-In a monorepo with npm/yarn `workspaces`, the shared `node_modules` would make imports of your own packages (`@scope/pkg`) load `main`'s copy of them. With node installed, `wt add` and `wt link` add small links (via `link-workspaces.mjs`) so those imports load the current worktree's code instead. Other repos aren't affected.
+In a JavaScript monorepo with npm or yarn `workspaces`, the shared `node_modules` would make imports of the repo's own packages (like `@acme/ui`) load `main`'s copy of them. If Node.js is installed, `wt add` and `wt link` add small extra links (with `link-workspaces.mjs`) so those imports load the code in the current branch folder instead. Other repos aren't affected.
 
 ## Windows
 
 `wt` runs in Git Bash, with these limits:
 
-- **Symlinks:** Git Bash's `ln -s` copies the folder instead of linking it, so each worktree gets its own copy of `node_modules`. For real symlinks, turn on Windows Developer Mode and set `MSYS=winsymlinks:nativestrict` (for example in `~/.bashrc`).
-- **`wt ls`** marks every worktree `[outside]` because Git Bash writes the same folder in two forms (like `/c/Users/...` and `C:/Users/...`). The rest of its report is right.
+- **Shared links:** Git Bash's `ln -s` copies a folder instead of linking to it, so each branch folder gets its own copy of `node_modules`. To get real links, turn on Windows Developer Mode and add `export MSYS=winsymlinks:nativestrict` to `~/.bashrc`.
+- **`wt ls`** marks every folder `[outside]`, because Git Bash writes the same folder in two forms (like `/c/Users/...` and `C:/Users/...`). The rest of its report is right.
 
 ## Uninstall
 
-Remove the lines you added to `~/.zshrc` or `~/.bashrc`, and delete `~/.local/share/wt` (or `~/.local/share/wt-repo`). Your worktrees are ordinary git worktrees, so `git worktree list` and `git worktree remove` still work without `wt`.
+Remove the lines you added to `~/.zshrc` or `~/.bashrc`, and delete the folder you downloaded in step 1. Your branch folders are ordinary git worktrees, so `git worktree list` and `git worktree remove` still work without `wt`.
