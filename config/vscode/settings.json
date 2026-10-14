@@ -1,0 +1,26 @@
+{
+  "update.mode": "none",
+  "[json]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[typescriptreact]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[typescript]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "gitlens.graph.minimap.additionalTypes": ["pullRequests"],
+  "gitlens.graph.minimap.enabled": false,
+  "editor.formatOnSave": true,
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "always",
+    "source.addMissingImports": "always",
+    "source.removeUnusedImports": "explicit",
+    "source.organizeImports": "always"
+  },
+  "gitlens.graph.layout": "editor",
+  "gitlens.graph.minimap.dataType": "lines",
+  "jest.runMode": "on-demand",
+  "git.autofetch": true,
+  "gitlens.graph.dimMergeCommits": true
+}

@@ -74,6 +74,7 @@ path_add "$HOME/.pyenv/bin"
 command -v jenv >/dev/null 2>&1 && eval "$(jenv init -)"
 command -v pyenv >/dev/null 2>&1 && eval "$(pyenv init -)"
 command -v yarn >/dev/null 2>&1 && path_add "$(yarn global bin 2>/dev/null)"
+command -v copilot >/dev/null 2>&1 && export COPILOT_BIN="$(command -v copilot)"
 
 # z: jump to frequently used folders
 for z_script in /opt/homebrew/etc/profile.d/z.sh /usr/local/etc/profile.d/z.sh; do

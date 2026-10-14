@@ -89,14 +89,47 @@
 
 	##### MERGE
 		m = "!f() { \
-			if git last-commit-is-wip; then \
-				echo Preventing merge due to the previous commit message includes WIP; \
-				echo Previous commit message: \"$(git last-commit-message)\"; \
-			else \
-				git merge \"$@\"; \
+			MERGE_ARGS=\"$*\"; \
+			THIS_BRANCH=$(git branch-name); \
+			NEW_STASH_NAME=\"Stash while merging to $THIS_BRANCH $(date +'%F %T')\"; \
+			if [ -n \"$(git status --porcelain)\" ]; then \
+				echo Stashing changes from working branch: \"$NEW_STASH_NAME\"; \
+				git add -A; \
+				git stash -m \"$NEW_STASH_NAME\"; \
 			fi; \
+			if git last-commit-is-wip; then \
+				LAST_COMMIT_MESSAGE=$(git last-commit-message); \
+				echo In preparation for merge, undoing previous commit due to including WIP: \"$LAST_COMMIT_MESSAGE\"; \
+				git reset --soft HEAD^; \
+				if git last-commit-is-wip; then \
+					echo Preventing merge due to another previous commit message including WIP; \
+					echo Previous commit message: \"$(git last-commit-message)\"; \
+				else \
+					echo Stashing changes from previous WIP commit: \"$LAST_COMMIT_MESSAGE\"; \
+					git add -A; \
+					git stash -m \"$LAST_COMMIT_MESSAGE\"; \
+					git merge $MERGE_ARGS; \
+					if [ -n \"$(git status --porcelain=2)\" ]; then \
+						echo Stashing changes from merge conflict: \"$NEW_STASH_NAME\"; \
+						git stash -m \"$NEW_STASH_NAME\"; \
+					fi; \
+					echo Restoring stashed changes from previous WIP commit: \"$LAST_COMMIT_MESSAGE\"; \
+					git stash pop; \
+					echo Recreating the previous WIP commit: \"$LAST_COMMIT_MESSAGE\"; \
+					git commit -m \"$LAST_COMMIT_MESSAGE\" --no-verify; \
+				fi; \
+			else \
+				git merge $MERGE_ARGS; \
+			fi; \
+			LAST_STASH=$(git stash list stash@{0} -1); \
+			case \"$LAST_STASH\" in \
+				*\"$NEW_STASH_NAME\"*) \
+					echo Restoring stashed changes from previous working branch: \"$NEW_STASH_NAME\"; \
+					git stash pop; \
+					;; \
+			esac; \
 		}; f"
-		merge-no-commit = merge --no-commit --no-ff
+		merge-no-commit = "!sh -c 'git merge --no-commit --no-ff \"$@\"; git merge --quit' --"
 		merge-with-commit = merge --no-ff # force a merge commit to be created
 		merge-with-commit-COMMENT = !echo \"force a merge commit to be created\"
 
@@ -186,6 +219,8 @@
 
 	##### BRANCH
 		branch-name = !git rev-parse --abbrev-ref HEAD
+		parent-branch = "!git log --oneline --decorate --simplify-by-decoration --decorate-refs-exclude=refs/tags -n 1 --skip 1 --format='%D' | sed 's/origin//g'"
+		branch-status = !bash "$DOTFILES/bin/branch-status.sh"
 		br = branch
 		b = br
 		branch-sort-by-date = branch --sort=committerdate
@@ -193,7 +228,15 @@
 		bs = bsort
 		bsort-long = "!git for-each-ref --sort=-committerdate refs/heads/ --format='%(HEAD); %(objectname:short); %(refname:short); (%(committerdate:relative)); %(authorname);' | column -t -s ';'"
 		bsl = bsort-long
-		bclean = !sh -c 'git branch --merged ${1-master} | grep -v " ${1-master}$" | xargs -r git branch -d'
+		bclean = "!f(){ \
+			base=${1:-main}; \
+			wt=$(git worktree list --porcelain | grep '^branch ' | sed 's#^branch refs/heads/##'); \
+			git branch --merged \"$base\" --format='%(refname:short)' | while IFS= read -r b; do \
+				[ \"$b\" = \"$base\" ] && continue; \
+				printf '%s\n' \"$wt\" | grep -qxF \"$b\" && continue; \
+				git branch -d \"$b\"; \
+			done; \
+		}; f"
 		b-search = !sh -c 'git branch -a | grep -i --color=auto $*' --
 		bwip = branch --sort=committerdate --list *WIP* *wip*
 		bw = "!git --no-pager branch --sort=committerdate --list *WIP* *wip*"
@@ -211,7 +254,7 @@
 			git push origin :$(git branch-name) $1 --no-verify;\
 			git push origin -u $1 --no-verify;\
 			};f"
-		rename-remote-and-remote-branch-COMMENT = !echo \"Note: Deletes old remote branch before recreating with new branch name. Usage: g rename-remote-branch <new-name>\"
+		rename-local-and-remote-branch-COMMENT = !echo \"Note: Deletes old remote branch before recreating with new branch name. Usage: g rename-local-and-remote-branch <new-name>\"
 		delete-merged-local-branches = !sh -c 'git branch --merged ${1} | grep -v "\\* ${1}" | xargs -n 1 git branch -d'
 		search-branch-names = !sh -c 'git branch -a | grep -i --color=auto $*' --
 		delete-local-branch = branch -d  # git branch --delete <branch-name>
@@ -359,13 +402,22 @@
 
 	##### COMMIT
 		co = commit
+		# co-wip commits only what's already staged; coa-wip stages everything first
 		co-wip = "!f() { \
 			if git last-commit-is-wip; then \
 				echo Preventing commit due to the previous commit message includes WIP; \
 				echo Previous commit message: \"$(git last-commit-message)\"; \
 			else \
+				git commit -m \"WIP $(git branch-name) $(date +'%F %T')\" --no-verify; \
+			fi; \
+		}; f"
+		coa-wip = "!f() { \
+			if git last-commit-is-wip; then \
+				echo Preventing commit due to the previous commit message includes WIP; \
+				echo Previous commit message: \"$(git last-commit-message)\"; \
+			else \
 				git add -A; \
-				git commit -m WIP --no-verify; \
+				git commit -m \"WIP $(git branch-name) $(date +'%F %T')\" --no-verify; \
 			fi; \
 		}; f"
 		# com <message> [-m <details>] [other git commit options]
