@@ -220,7 +220,7 @@
 	##### BRANCH
 		branch-name = !git rev-parse --abbrev-ref HEAD
 		parent-branch = "!git log --oneline --decorate --simplify-by-decoration --decorate-refs-exclude=refs/tags -n 1 --skip 1 --format='%D' | sed 's/origin//g'"
-		branch-report = !bash "$DOTFILES/git/branch-status.sh"
+		branch-report = !bash "$DOTFILES/git/branch-report.sh"
 		br = branch
 		b = br
 		branch-sort-by-date = branch --sort=committerdate

@@ -72,7 +72,7 @@ These live in `git/` rather than `bin/` because you run them through a git alias
 
 | File | Contents |
 | --- | --- |
-| `git/branch-status.sh` | Richer branch status report: remote/PR state (via `gh`), worktree awareness, and squash-merge-aware "in base" detection. Run it with `git branch-report` (`git branch-status` runs `bin/git-branch-status`) |
+| `git/branch-report.sh` | Richer branch status report: remote/PR state (via `gh`), worktree awareness, and squash-merge-aware "in base" detection. Run it with `git branch-report` (`git branch-status` runs `bin/git-branch-status`) |
 | `git/wt/` | A git worktree manager, run as `wt` (see `wt help` once a shell has loaded this repo). Configure it per-repo with a `WT_*`-exporting alias in `~/.shell_local` (`wt help` documents the variables) |
 
 ### VS Code
@@ -141,7 +141,7 @@ What's tested:
 | `__test__/` | `install.sh`: the shell blocks it manages, and the order of `~/.gitconfig` |
 | `tools/__test__/` | Each `check-*.sh` flags a bad example and passes a good one, in a throwaway git repo |
 | `shell/__test__/` | `path_add` and the Homebrew setup in `shell/common.sh` |
-| `git/__test__/` | The `bclean`, `m`, `co-wip`/`coa-wip` and `merge-no-commit` git aliases, and `git/branch-status.sh` |
+| `git/__test__/` | The `bclean`, `m`, `co-wip`/`coa-wip` and `merge-no-commit` git aliases, and `git/branch-report.sh` |
 | `shell/common/__test__/` | `git_dev_branch`, which `dev`, `sprint`, `gmerge-dev` and others use |
 
 Install bats with `brew install bats-core` (macOS), `sudo apt install bats` (Linux) or `npm install -g bats` (Git Bash). CI runs the tests on macOS (including its built-in bash 3.2), Linux and Windows. The commit hook doesn't, so commits stay fast and work without bats.

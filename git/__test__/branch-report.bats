@@ -1,8 +1,8 @@
 #!/usr/bin/env bats
-# Tests for git/branch-status.sh: a read-only report of local branch(es) vs a base branch.
+# Tests for git/branch-report.sh: a read-only report of local branch(es) vs a base branch.
 
 setup() {
-	SCRIPT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)/branch-status.sh"
+	SCRIPT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)/branch-report.sh"
 	export HOME="$BATS_TEST_TMPDIR/home"
 	export GIT_CONFIG_NOSYSTEM=1
 	unset GIT_CONFIG_GLOBAL
@@ -16,8 +16,8 @@ setup() {
 	git -C "$PROJECT" branch -M main
 }
 
-# branch_status [options]: Run branch-status.sh in $PROJECT against main, with no network fetch
-branch_status() {
+# branch_report [options]: Run branch-report.sh in $PROJECT against main, with no network fetch
+branch_report() {
 	run bash "$SCRIPT" --base main --no-fetch "$@"
 }
 
@@ -29,7 +29,7 @@ branch_status() {
 @test "--help prints usage and exits 0" {
 	run bash "$SCRIPT" --help
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"branch-status.sh"* ]] || false
+	[[ "$output" == *"branch-report.sh"* ]] || false
 	[[ "$output" == *"--base"* ]] || false
 	[[ "$output" == *"--no-fetch"* ]] || false
 }
@@ -44,7 +44,7 @@ branch_status() {
 	git merge -q --ff-only merged-in
 	git checkout -q main
 
-	branch_status
+	branch_report
 	[[ "$output" == *"Branch status vs main"* ]] || false
 	[[ "$output" == *"feature/x"* ]] || false
 	[[ "$output" == *"merged-in"* ]] || false
@@ -59,7 +59,7 @@ branch_status() {
 
 	before_head="$(git rev-parse HEAD)"
 	before_branches="$(git branch --format='%(refname:short)')"
-	branch_status
+	branch_report
 	[ "$(git rev-parse HEAD)" = "$before_head" ]
 	[ "$(git branch --format='%(refname:short)')" = "$before_branches" ]
 }
@@ -71,6 +71,6 @@ branch_status() {
 	git checkout -q main
 	git merge -q --ff-only feature/y
 
-	branch_status
+	branch_report
 	[[ "$output" == *"in base:  YES (ancestor)"* ]] || false
 }
