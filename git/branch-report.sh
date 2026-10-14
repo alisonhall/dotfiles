@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# branch-status.sh — report the status of one or more LOCAL git branches
+# branch-report.sh — report the status of one or more LOCAL git branches
 # compared against a base branch (default: origin/main).
 #
 # For each branch it reports:
@@ -45,7 +45,7 @@
 # it (faster / offline).
 #
 # Usage:
-#   branch-status.sh [options] [branch ...]
+#   branch-report.sh [options] [branch ...]
 #
 #   With no branch arguments, EVERY local branch (except the base) is reported.
 #   With one or more branch arguments, only those are reported.
@@ -119,7 +119,7 @@ while [ $# -gt 0 ]; do
 			;;
 		--) shift; while [ $# -gt 0 ]; do BRANCHES+=("$1"); shift; done ;;
 		-*)
-			echo "branch-status: unknown option: $1 (see -h)" >&2
+			echo "branch-report: unknown option: $1 (see -h)" >&2
 			exit 2
 			;;
 		*) BRANCHES+=("$1") ;;
@@ -134,7 +134,7 @@ done
 # every git op below is anchored there and behaves identically regardless of
 # which worktree the user is in.
 if ! REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"; then
-	echo "branch-status: not run inside a git repository." >&2
+	echo "branch-report: not run inside a git repository." >&2
 	exit 1
 fi
 
@@ -146,7 +146,7 @@ REPO_SLUG="$(git -C "$REPO_ROOT" remote get-url "$REMOTE_NAME" 2>/dev/null \
 
 # The base must resolve to a commit.
 if ! git -C "$REPO_ROOT" rev-parse --verify --quiet "${BASE}^{commit}" >/dev/null 2>&1; then
-	echo "branch-status: base '$BASE' does not resolve to a commit." >&2
+	echo "branch-report: base '$BASE' does not resolve to a commit." >&2
 	exit 1
 fi
 
@@ -166,7 +166,7 @@ DO_FETCH=1
 if [ "$FETCH" = "1" ] && [ -n "$FETCH_PERIOD" ]; then
 	# Per-repo cache file so different repos don't share a throttle window.
 	repo_hash="$(printf '%s' "$REPO_ROOT" | md5 -q 2>/dev/null || printf '%s' "$REPO_ROOT" | shasum 2>/dev/null | cut -c1-12)"
-	cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/branch-status"
+	cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/branch-report"
 	cache_file="$cache_dir/last-fetch-${repo_hash:-default}"
 	now_ts="$(date +%s)"
 	last_ts="$(cat "$cache_file" 2>/dev/null || echo 0)"
@@ -183,7 +183,7 @@ if [ "$FETCH" = "1" ] && [ "$DO_FETCH" = "1" ]; then
 			mkdir -p "$cache_dir" 2>/dev/null && date +%s > "$cache_file" 2>/dev/null
 		fi
 	else
-		echo "branch-status: warning: fetch from $REMOTE_NAME failed; remote state may be stale." >&2
+		echo "branch-report: warning: fetch from $REMOTE_NAME failed; remote state may be stale." >&2
 	fi
 fi
 
@@ -339,7 +339,7 @@ if [ "${#BRANCHES[@]}" -eq 0 ]; then
 fi
 
 if [ "${#BRANCHES[@]}" -eq 0 ]; then
-	echo "branch-status: no branches to report."
+	echo "branch-report: no branches to report."
 	exit 0
 fi
 
