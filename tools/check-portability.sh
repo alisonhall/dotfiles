@@ -17,9 +17,10 @@
 #      (C:\Users\Jane Doe, C:\Program Files) and macOS (/Library/Application Support).
 #   7. Windows paths with backslashes (C:\Users\...): bash treats \ as an escape. Use C:/Users/...,
 #      which Git Bash and Windows programs both accept.
-#   8. Mac-only (/Applications, /opt/homebrew...) or Windows-only (C:/..., /c/Users...) paths
+#   8. Mac-only (/Applications, /opt/homebrew...) or Windows-only (C:/..., /c/Users..., %VAR%) paths
 #      outside shell/os/, unless the same line checks the OS or whether the path exists
-#      (Darwin, MINGW, $DOTFILES_OS, [ -d ... ], path_add...), or it's in a `for ... in` list.
+#      (Darwin, MINGW, $DOTFILES_OS, [ -d ... ], path_add...), is a printf format string (where
+#      %s%s-style sequences otherwise look like %VAR%), or it's in a `for ... in` list.
 #
 # To allow a line anyway, add a comment to it containing: path-check: ignore
 #
@@ -259,7 +260,7 @@ if [ ${#os_path_files[@]} -gt 0 ]; then
 			if (!continued) in_for = 0
 		}
 		/^[[:space:]]*#/ || /path-check: ignore/ { next }
-		/Darwin|darwin|MINGW|MSYS|CYGWIN|DOTFILES_OS|OSTYPE|uname|path_add|command -v|\[ -[defx] |\[\[ -[defx] / { guarded = 1 }
+		/Darwin|darwin|MINGW|MSYS|CYGWIN|DOTFILES_OS|OSTYPE|uname|path_add|command -v|\[ -[defx] |\[\[ -[defx] |printf / { guarded = 1 }
 		guarded { next }
 		/(^|[[:space:]"\047=:(])(~|\$HOME|\$\{HOME\})?\/(Applications|Library|System|Volumes|opt\/homebrew|usr\/local\/Cellar|private)(\/|[[:space:]"\047]|$)/ {
 			print FILENAME ":" FNR ":" $0 "  (macOS only)"; next
