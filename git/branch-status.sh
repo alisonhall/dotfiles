@@ -64,7 +64,7 @@
 #
 # Output is colour-coded when stdout is a TTY (and NO_COLOR is unset).
 #
-# Invoked by the branch-status git alias (see git/gitconfig). Complements the
+# Invoked by the branch-report git alias (see git/gitconfig). Complements the
 # vendored bin/git-branch-status: this one adds PR state (via gh), worktree
 # awareness, and squash-merge-aware "in base" detection.
 
