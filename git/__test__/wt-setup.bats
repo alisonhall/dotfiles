@@ -274,3 +274,27 @@ loads_cleanly() {
 	[ "$status" -eq 0 ]
 	[ "$(cat "$HOME/.bash_profile")" = 'source ~/.bashrc' ]
 }
+
+@test "on Windows, offers to let git use long paths, and turns them on" {
+	export WT_SETUP_OS=MINGW64_NT-10.0
+	# ...fresh-clone answers, then "let git use longer paths?", go ahead
+	setup_with "$REMOTE" acme/shop "" 1 "" "" "" "" y y
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"Let git use long paths: git config --global core.longpaths true"* ]] || false
+	[ "$(git config --global --get core.longpaths)" = true ]
+}
+
+@test "on Windows, doesn't ask about long paths when git already allows them" {
+	export WT_SETUP_OS=MINGW64_NT-10.0
+	git config --global core.longpaths true
+	fresh_clone
+	[ "$status" -eq 0 ]
+	[[ "$output" != *"Let git use longer paths"* ]] || false
+}
+
+@test "doesn't ask about long paths on other systems" {
+	fresh_clone
+	[ "$status" -eq 0 ]
+	[[ "$output" != *"Let git use longer paths"* ]] || false
+	[ -z "$(git config --global --get core.longpaths)" ]
+}
