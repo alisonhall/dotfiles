@@ -87,6 +87,7 @@ Every question has a default, shown in `[brackets]`, so you can press Enter to a
 - adds a line that loads `wt`, unless the file loads it already
 - adds the repo's command, between `# >>> wt: <command-name> >>>` and `# <<< wt: <command-name> <<<` lines
 - on macOS and Windows, if you use bash, makes `~/.bash_profile` load `~/.bashrc` if it doesn't already. New terminals there read `~/.bash_profile`, not `~/.bashrc`
+- on Windows, if you say yes, lets git use paths longer than 260 characters (see [Windows](#windows))
 
 Running it again for the same command replaces that command's block, so add any settings it didn't ask about again afterwards. To see what it would do without changing anything, run it with `--dry-run`.
 
@@ -113,7 +114,7 @@ Add this line to that file:
 . "<wt-folder>/wt.sh"
 ```
 
-Open a new terminal and run `wt help`. If it lists the commands, `wt` is loaded.
+Open a new terminal and run `type wt`. If it says `wt is a function`, `wt` is loaded. (On Windows, `wt` is also Windows Terminal's command, so `wt help` would open Windows Terminal until this `wt` is loaded. See [Windows](#windows).)
 
 `wt` is loaded this way, as a shell function, rather than run as a script, because a script can't change your terminal's current folder, and `wt add`, `wt cd` and `wt main` do.
 
@@ -301,6 +302,9 @@ In a JavaScript monorepo with npm or yarn `workspaces`, the shared `node_modules
 - **Shared links:** Windows only allows ordinary symlinks with Developer Mode turned on, and Git Bash copies files instead of linking them otherwise. So without Developer Mode, `wt` shares folders (like `node_modules`) through *junctions*, and files (like `.env`) through *hard links*. Neither needs admin rights. A hard link stops being shared if an editor saves the file by replacing it; `wt link --check` reports that, and you can delete the branch folder's copy and run `wt link` again. With Developer Mode on, `wt` makes ordinary symlinks.
 - **Deleting branch folders yourself:** on Windows, `git worktree remove` follows junctions and **deletes everything inside the folders they point to**, like `main/node_modules`. `wt rm` and `wt clean` delete a folder's links first, so use them. If you use `git worktree remove` directly, delete the folder's links first: `find <folder> -type l -delete`.
 - **Folders in use:** Windows can't delete a folder that a program is using, like an editor with it open or a terminal that's in it, and a delete that fails partway leaves it half deleted. `wt rm` and `wt clean` check first, and leave a folder that's in use untouched. Close the program (or `cd` out of the folder), then run them again.
+- **Long paths:** Windows limits paths to 260 characters, and deep folders like `node_modules` inside a branch folder can go past that, so git fails with "Filename too long". Git can use longer paths: `git config --global core.longpaths true`. On Windows, the setup script offers to turn that on.
+- **The name `wt`:** Windows Terminal's command is also called `wt`. Once this `wt` is loaded, it takes over that name in Git Bash. To open Windows Terminal from Git Bash, type `wt.exe`. Your per-repo commands (`<command-name>`) don't clash with it, so they're a good reason to use one even for a single repo.
+
 ## Uninstall
 
 Remove the lines you added to `~/.zshrc` or `~/.bashrc`, and delete `<wt-folder>` (or `<folder-to-clone-into>`, if you used git). Your branch folders are ordinary git worktrees, so `git worktree list` and `git worktree remove` still work without `wt`. On Windows, read [Deleting branch folders yourself](#windows) before using `git worktree remove`.

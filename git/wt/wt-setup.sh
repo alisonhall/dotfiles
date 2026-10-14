@@ -547,6 +547,15 @@ say "its own copy of (like .env). node_modules is always shared. Type - for none
 ask SHARED "Shared files, separated by spaces" "${suggest_shared:--}"
 [ "$SHARED" = - ] && SHARED=""
 
+# Windows limits paths to 260 characters unless git is told otherwise, and node_modules inside a
+# branch folder goes past that easily ("Filename too long")
+LONG_PATHS=0
+if is_windows && [ "$(git config --global --get core.longpaths)" != true ]; then
+	say "Windows limits paths to 260 characters, which deep folders like node_modules can go past"
+	say "in a branch folder, and git then fails with \"Filename too long\"."
+	ask_yes_no "Let git use longer paths, for all your repos (git config --global core.longpaths true)?" y && LONG_PATHS=1
+fi
+
 #   -------------------------------
 #   PLAN
 #   -------------------------------
@@ -586,24 +595,31 @@ if [ "$IN_DOTFILES" = 0 ] && [ "$STARTUP_FILE" = "$HOME/.bashrc" ]; then
 fi
 
 heading "Plan"
+plan_step=0
+# step <text>: Say the plan's next numbered step
+step() {
+	plan_step=$((plan_step + 1))
+	say "$plan_step. $*"
+}
 case "$MODE" in
-	clone) say "1. Clone $(clone_source) into $(pretty_path "$MAIN")" ;;
-	move) say "1. Move $(pretty_path "$MOVE_FROM") to $(pretty_path "$MAIN")" ;;
-	existing) say "1. Use the clone that's already in $(pretty_path "$MAIN")" ;;
+	clone) step "Clone $(clone_source) into $(pretty_path "$MAIN")" ;;
+	move) step "Move $(pretty_path "$MOVE_FROM") to $(pretty_path "$MAIN")" ;;
+	existing) step "Use the clone that's already in $(pretty_path "$MAIN")" ;;
 esac
 if has_block "$STARTUP_FILE" "$COMMAND_NAME"; then
-	say "2. Replace the $COMMAND_NAME command in $(pretty_path "$STARTUP_FILE") with:"
+	step "Replace the $COMMAND_NAME command in $(pretty_path "$STARTUP_FILE") with:"
 else
-	say "2. Add this to $(pretty_path "$STARTUP_FILE"):"
+	step "Add this to $(pretty_path "$STARTUP_FILE"):"
 fi
 [ -n "$load_block" ] && printf '%s\n' "$load_block" | sed 's/^/     /'
 printf '%s\n' "$command_block" | sed 's/^/     /'
 [ -f "$STARTUP_FILE" ] && say "   (backing it up first)"
 if [ -n "$login_block" ]; then
-	say "3. Add this to $(pretty_path "$LOGIN_FILE"), so new terminals (login shells) load ~/.bashrc:"
+	step "Add this to $(pretty_path "$LOGIN_FILE"), so new terminals (login shells) load ~/.bashrc:"
 	printf '%s\n' "$login_block" | sed 's/^/     /'
 	[ -f "$LOGIN_FILE" ] && say "   (backing it up first)"
 fi
+[ "$LONG_PATHS" = 1 ] && step "Let git use long paths: git config --global core.longpaths true"
 
 if [ "$DRY_RUN" = 1 ]; then
 	say ""
@@ -671,6 +687,10 @@ if [ -n "$login_block" ]; then
 	backup "$LOGIN_FILE"
 	set_block "$LOGIN_FILE" load-bashrc "$login_block" || die "couldn't update $(pretty_path "$LOGIN_FILE")."
 	say "Made $(pretty_path "$LOGIN_FILE") load ~/.bashrc"
+fi
+if [ "$LONG_PATHS" = 1 ]; then
+	git config --global core.longpaths true || die "couldn't turn on core.longpaths in git."
+	say "Let git use long paths"
 fi
 say "Added the $COMMAND_NAME command to $(pretty_path "$STARTUP_FILE")"
 
