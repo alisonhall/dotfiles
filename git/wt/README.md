@@ -36,8 +36,8 @@ The instructions below use these placeholders. Replace each one, including its `
 | `<wt-folder>` | The folder you put the `wt` scripts in, in [step 1](#1-download-the-scripts). |
 | `<repo-owner>` | The GitHub user or organization that owns your repo: the first part of its URL after `github.com/`. |
 | `<repo-name>` | Your repo's name: the part of its URL after `<repo-owner>/`. |
-| `<repo-location>` | The folder that will hold your repo's branch folders, set up in [step 4](#4-set-up-the-repos-folder). It can be anywhere. |
-| `<command-name>` | A name you choose for your repo's `wt` command, in [step 3](#3-tell-wt-where-your-repo-is). |
+| `<repo-location>` | The folder that will hold your repo's branch folders, set up in [step 2](#2-run-the-setup) or [step C](#c-set-up-the-repos-folder). It can be anywhere. |
+| `<command-name>` | A name you choose for your repo's `wt` command, in [step 2](#2-run-the-setup) or [step B](#b-tell-wt-where-your-repo-is). |
 
 Write folder paths starting with `$HOME` rather than `~` (for example `$HOME/code/<repo-name>`), because `~` doesn't work inside quotes.
 
@@ -66,7 +66,36 @@ git -C "<folder-to-clone-into>" sparse-checkout set git/wt
 git -C "<folder-to-clone-into>" pull
 ```
 
-### 2. Load `wt` in your terminal
+### 2. Run the setup
+
+The setup script does the rest for you. Run it for each repo you want to use with `wt`:
+
+```sh
+bash "<wt-folder>/wt-setup.sh"
+```
+
+Once `wt` is loaded, `wt setup` runs it too. It asks:
+
+1. **Which repo:** its GitHub `<repo-owner>/<repo-name>`, or a URL to clone. If you run it from inside a clone, it offers that repo.
+2. **Which folder to keep it in** (`<repo-location>`), and how to get the clone into `<repo-location>/main`: clone it from GitHub, or move a clone you already have. If `<repo-location>/main` is already a clone, it uses that.
+3. **A name for the repo's command** (`<command-name>`), the branch new branches start from, and any files to [share between branch folders](#shared-files-node_modules-env).
+4. **Which startup file to add the command to.** It suggests `~/.zshrc` or `~/.bashrc`, depending on your shell.
+
+Every question has a default, shown in `[brackets]`, so you can press Enter to accept it. Then it shows exactly what it will do and asks before doing it. It backs up the startup file, then:
+
+- clones or moves the repo into `<repo-location>/main`
+- adds a line that loads `wt`, unless the file loads it already
+- adds the repo's command, between `# >>> wt: <command-name> >>>` and `# <<< wt: <command-name> <<<` lines
+
+Running it again for the same command replaces that command's block, so add any settings it didn't ask about again afterwards. To see what it would do without changing anything, run it with `--dry-run`.
+
+Then open a new terminal and try `<command-name> ls`.
+
+### Or set up by hand
+
+These steps do the same as the setup script.
+
+#### A. Load `wt` in your terminal
 
 Your terminal runs a startup file each time it opens. Which one depends on your shell:
 
@@ -87,9 +116,9 @@ Open a new terminal and run `wt help`. If it lists the commands, `wt` is loaded.
 
 `wt` is loaded this way, as a shell function, rather than run as a script, because a script can't change your terminal's current folder, and `wt add`, `wt cd` and `wt main` do.
 
-### 3. Tell `wt` where your repo is
+#### B. Tell `wt` where your repo is
 
-`wt` reads its settings from environment variables, so one copy can work with several repos. The easiest way to set them is to make your own command for each repo. Add a line like this to the same startup file as in step 2 (`~/.zshrc` or `~/.bashrc`):
+`wt` reads its settings from environment variables, so one copy can work with several repos. The easiest way to set them is to make your own command for each repo. Add a line like this to the same startup file as in step A (`~/.zshrc` or `~/.bashrc`):
 
 ```sh
 alias <command-name>='WT_WORKTREE_REPO_LOCATION="<repo-location>" WT_REPO_SLUG=<repo-owner>/<repo-name> wt'
@@ -98,7 +127,7 @@ alias <command-name>='WT_WORKTREE_REPO_LOCATION="<repo-location>" WT_REPO_SLUG=<
 | Part | What it is |
 | --- | --- |
 | `<command-name>` | The name of your new command. Pick any name that isn't already a command, such as the repo's name followed by `-wt`. |
-| `WT_WORKTREE_REPO_LOCATION="<repo-location>"` | The folder that holds the repo's branch folders, which you'll set up in step 4. |
+| `WT_WORKTREE_REPO_LOCATION="<repo-location>"` | The folder that holds the repo's branch folders, which you'll set up in step C. |
 | `WT_REPO_SLUG=<repo-owner>/<repo-name>` | The repo's owner and name, as in its URL: `github.com/<repo-owner>/<repo-name>`. |
 | `wt` | Runs `wt` with those settings. They apply only to this command, not to the rest of your terminal. |
 
@@ -113,7 +142,7 @@ export WT_REPO_SLUG=<repo-owner>/<repo-name>
 
 [Settings](#settings) lists the other variables you can set the same way.
 
-### 4. Set up the repo's folder
+#### C. Set up the repo's folder
 
 `wt` needs the repo in a particular shape: one folder, `<repo-location>`, with a normal clone of the repo inside it in a folder named `main`. `wt` adds a folder next to `main` for each branch you work on.
 
@@ -174,7 +203,7 @@ git -C "<repo-location>/main" worktree repair    # reconnects any worktrees you 
 | ❌ | The clone is in `<repo-location>/develop` because the default branch is `develop` | The folder must be named `main`, whatever its branch. Set `CURRENT_DEV_BRANCH=develop` (see [Settings](#settings)) so new branches start from `develop` |
 | ✅ | `<repo-location>/main` is a clone, and `WT_WORKTREE_REPO_LOCATION="<repo-location>"` | |
 
-#### The bare-repo layout
+##### The bare-repo layout
 
 Some people set up worktrees differently, with a "bare" repo. A bare repo is only git's data (what's normally in a `.git` folder), with no files checked out. In this layout the bare repo sits in a hidden `.bare` folder, and every branch, including `main`, is a worktree with a `.git` file that points to it:
 
@@ -193,7 +222,7 @@ Some people set up worktrees differently, with a "bare" repo. A bare repo is onl
 
 ## Commands
 
-The commands are written with `wt`. If you made your own command in [step 3](#3-tell-wt-where-your-repo-is), type `<command-name>` instead.
+The commands are written with `wt`. If you made your own command in [step 2](#2-run-the-setup) or [step B](#b-tell-wt-where-your-repo-is), type `<command-name>` instead.
 
 `<branch>` is always the branch's name as it is on GitHub, like `feature/login`, not its folder name.
 
@@ -222,9 +251,9 @@ The commands are written with `wt`. If you made your own command in [step 3](#3-
 
 ## Settings
 
-Set these in the same place as in [step 3](#3-tell-wt-where-your-repo-is):
+The [setup script](#2-run-the-setup) writes the settings it asks about. To set others, or if you set up by hand, put them in your startup file (`~/.zshrc` or `~/.bashrc`):
 
-- **For one repo:** add them to that repo's command in `~/.zshrc` or `~/.bashrc`. With several settings, a function is easier to read than an alias. It works the same way:
+- **For one repo:** add them to that repo's command. The setup script writes the command as a function like the one below, which is easier to read than an alias once there are several settings. If you add settings to a block the setup wrote, add them again after running the setup again for that command, since it replaces the block.
 
   ```sh
   <command-name>() {
@@ -242,7 +271,7 @@ Open a new terminal after changing either file.
 
 | Setting | Needed? | Default | What it's for |
 | --- | --- | --- | --- |
-| `WT_WORKTREE_REPO_LOCATION` | Always | | `<repo-location>`: the folder that contains `main/` (see [step 4](#4-set-up-the-repos-folder)) |
+| `WT_WORKTREE_REPO_LOCATION` | Always | | `<repo-location>`: the folder that contains `main/` (see [step C](#c-set-up-the-repos-folder)) |
 | `WT_REPO_SLUG` | For `wt clean` | | `<repo-owner>/<repo-name>`: the GitHub repo's owner and name |
 | `CURRENT_DEV_BRANCH` | No | `main` | The branch that `wt add` starts new branches from |
 | `CURRENT_REMOTE_NAME` | No | `origin` | The git remote that points at GitHub |

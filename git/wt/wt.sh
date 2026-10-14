@@ -10,7 +10,7 @@
 #   * EXECUTED (bash wt.sh <sub> [args...]): dispatches to the matching
 #     wt-*.sh script in this folder.
 #
-# Subcommands: add, cd, rm, ls, link, clean, help
+# Subcommands: add, cd, rm, ls, link, clean, setup, help
 #
 # shell/common/git.sh only needs to source this file (`. "$WT_DIR/wt.sh"`) —
 # no per-command aliases. `wt help` lists every command, description, and option.
@@ -73,6 +73,7 @@ case "$sub" in
   ls)    run wt-ls.sh    "${@:2}" ;;
   link)  run wt-link.sh  "${@:2}" ;;
   clean) run wt-clean.sh "${@:2}" ;;
+  setup) run wt-setup.sh "${@:2}" ;;
   help|-h|--help)
     cat <<'HELP'
 wt — git worktree manager (works with both the bare-repo and the
@@ -112,6 +113,9 @@ Commands:
                                               commit is older than <d>
                                               (e.g. 30d, 12h, 4w, 90m)
   main                    cd into the main worktree.
+  setup [--dry-run]       Set up a repo for wt: get it into the folder layout
+                          wt expects, and add a command for it to your shell's
+                          startup file. Asks before changing anything.
   help                    Show this help.
 
 Examples:
