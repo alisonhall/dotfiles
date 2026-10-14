@@ -11,7 +11,7 @@
 
 `wt add <branch>` creates a worktree for a branch and moves you into it, `wt ls` shows the state of every worktree, and `wt clean` removes the ones whose PRs are finished. Folder names are the branch name with `/` replaced by `_`.
 
-These scripts are part of a dotfiles repo, but don't depend on anything else in it. You can download just this folder.
+These scripts are part of [github.com/alisonhall/dotfiles](https://github.com/alisonhall/dotfiles), but don't depend on anything else in it. You can download just this folder.
 
 ## Requirements
 
@@ -27,20 +27,18 @@ Written for macOS and Linux. It also runs in Git Bash on Windows, with [some lim
 
 ### 1. Download the scripts
 
-In these commands, replace `OWNER` with the GitHub account this repo belongs to. It's the part after `github.com/` in your browser's address bar.
-
 Either download this folder once:
 
 ```sh
 mkdir -p ~/.local/share/wt
-curl -fsSL https://github.com/OWNER/dotfiles/archive/refs/heads/main.tar.gz |
+curl -fsSL https://github.com/alisonhall/dotfiles/archive/refs/heads/main.tar.gz |
 	tar -xz --strip-components=3 -C ~/.local/share/wt dotfiles-main/git/wt
 ```
 
 Or clone just this folder with git, so you can update it later with `git -C ~/.local/share/wt-repo pull`:
 
 ```sh
-git clone --depth 1 --filter=blob:none --sparse https://github.com/OWNER/dotfiles.git ~/.local/share/wt-repo
+git clone --depth 1 --filter=blob:none --sparse https://github.com/alisonhall/dotfiles.git ~/.local/share/wt-repo
 git -C ~/.local/share/wt-repo sparse-checkout set git/wt
 ```
 
