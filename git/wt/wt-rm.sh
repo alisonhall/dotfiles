@@ -22,23 +22,39 @@ source "$(cd "$(dirname "$0")" && pwd)/wt-common.sh"
 folder="$WT_WORKTREE_REPO_LOCATION/$LOCAL_BRANCH_NAME"
 MAIN_WT="$WT_WORKTREE_REPO_LOCATION/main"
 
+# Only ever a branch's folder. Something git wouldn't accept as a branch name could be another
+# folder entirely: .bare (the repo itself, in the bare-repo layout), . or .. (the collection
+# folder, or the one it's in).
+if ! git check-ref-format --branch "$REMOTE_BRANCH_NAME" >/dev/null 2>&1; then
+	echo "wt-rm: '$REMOTE_BRANCH_NAME' isn't a branch name."
+	exit 1
+fi
 # Never the main folder: it holds the repo's git data, so deleting it would lose every unpushed
-# branch and stash, and break every other branch folder. Nor . or .. (the collection folder, or
-# the one it's in), which git doesn't allow as branch names anyway.
-case "$LOCAL_BRANCH_NAME" in
-	. | ..)
-		echo "wt-rm: '$REMOTE_BRANCH_NAME' isn't a branch name."
-		exit 1
-		;;
-esac
+# branch and stash, and break every other branch folder
 if [ "$LOCAL_BRANCH_NAME" = main ] || { [ -d "$folder" ] && [ "$folder" -ef "$MAIN_WT" ]; }; then
 	echo "wt-rm: won't delete the main folder, which holds the repo itself."
 	exit 1
 fi
 
 if [ ! -d "$folder" ]; then
-	# Already deleted (by hand, say): just remove git's record of it
-	echo "wt-rm: there's no folder $LOCAL_BRANCH_NAME in $WT_WORKTREE_REPO_LOCATION, so there's nothing to delete."
+	# Already deleted (by hand, say): just remove git's record of it, if it has one. If not, the
+	# branch name is probably mistyped.
+	registered=0
+	while IFS= read -r line; do
+		case "$line" in
+			worktree\ *)
+				wt_path="${line#worktree }"
+				if [ "$(basename "$wt_path")" = "$LOCAL_BRANCH_NAME" ] && [ "$(dirname "$wt_path")" -ef "$WT_WORKTREE_REPO_LOCATION" ]; then
+					registered=1
+				fi
+				;;
+		esac
+	done < <(git -C "$MAIN_WT" worktree list --porcelain 2>/dev/null)
+	if [ "$registered" = 0 ]; then
+		echo "wt-rm: there's no worktree for $REMOTE_BRANCH_NAME (no folder $LOCAL_BRANCH_NAME in $WT_WORKTREE_REPO_LOCATION)."
+		exit 1
+	fi
+	echo "wt-rm: $LOCAL_BRANCH_NAME was already deleted, so this just removes git's record of it."
 	git -C "$MAIN_WT" worktree prune
 	echo "Pruned stale worktrees."
 	exit 0

@@ -106,16 +106,31 @@ folder_in_use() {
 # Windows, `git worktree remove` follows junctions and deletes everything inside the folders
 # they point to, such as main/node_modules. (rm -r doesn't, but this protects either way.)
 #
-# It doesn't look inside a real node_modules folder (one installed in this folder, rather than
-# a link to main's): that's slow on Windows, and the links in one point within this folder, so
-# following them only reaches files that are being deleted anyway. It also leaves symlinks the
-# repo itself tracks, which git removes as files, so the folder stays intact if git refuses.
+# It doesn't search inside a real node_modules folder (one installed in this folder, rather
+# than a link to main's): that's slow on Windows, and the links npm makes in one point within
+# this folder, so following them only reaches files that are being deleted anyway. The links wt
+# makes (node_modules and WT_SYMLINK_PAIRS) are deleted by name, wherever they are.
+#
+# Links the repo itself tracks are deleted too: whether git follows them depends on the system
+# (on Windows with Developer Mode, they're real symlinks). If the folder then isn't deleted after
+# all, restore_tracked_links puts them back.
 remove_links() {
-	local link
+	local link rel main_rel
+	while IFS=$'\t' read -r rel main_rel; do
+		[ -n "$rel" ] && [ -L "$1/$rel" ] && rm -f "$1/$rel"
+	done < <(worktree_symlink_pairs)
 	while IFS= read -r link; do
-		git -C "$1" ls-files --error-unmatch -- "${link#"$1"/}" >/dev/null 2>&1 && continue
 		rm -f "$link"
 	done < <(find "$1" \( -name .git -o \( -name node_modules ! -type l \) \) -prune -o -type l -print 2>/dev/null)
+}
+
+# restore_tracked_links <folder>: Put back the tracked files remove_links deleted, for a folder
+# that wasn't deleted after all. (Only deleted files are restored, never changed ones.)
+restore_tracked_links() {
+	local path
+	while IFS= read -r -d '' path; do
+		git -C "$1" checkout -- "$path" 2>/dev/null
+	done < <(git -C "$1" ls-files --deleted -z 2>/dev/null)
 }
 
 # Re-point the @scope/* workspace packages to THIS worktree's source (the root

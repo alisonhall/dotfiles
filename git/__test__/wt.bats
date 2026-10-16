@@ -221,7 +221,7 @@ merged_branch() {
 	rm -rf "$WT_WORKTREE_REPO_LOCATION/feature_gone"
 	run bash "$WT/wt.sh" rm feature/gone
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"there's no folder feature_gone"* ]] || false
+	[[ "$output" == *"feature_gone was already deleted"* ]] || false
 	[[ "$(git -C "$MAIN" worktree list)" != *feature_gone* ]] || false
 }
 
@@ -232,8 +232,8 @@ merged_branch() {
 	[ -d "$MAIN/.git" ]
 }
 
-@test "wt rm won't take . or .. as a branch" {
-	for name in . ..; do
+@test "wt rm won't take anything git wouldn't accept as a branch name, like . or .." {
+	for name in . .. .git feature/.hidden; do
 		run bash "$WT/wt.sh" rm "$name"
 		[ "$status" -ne 0 ]
 		[[ "$output" == *"isn't a branch name"* ]] || false
@@ -241,7 +241,53 @@ merged_branch() {
 	[ -d "$MAIN/.git" ]
 }
 
-@test "wt clean leaves symlinks the repo tracks when git refuses to remove the folder" {
+@test "wt rm won't delete the repo itself in the bare-repo layout (.bare)" {
+	export WT_WORKTREE_REPO_LOCATION="$BATS_TEST_TMPDIR/bare-layout"
+	git clone -q --bare "$BATS_TEST_TMPDIR/origin.git" "$WT_WORKTREE_REPO_LOCATION/.bare"
+	git -C "$WT_WORKTREE_REPO_LOCATION/.bare" worktree add -q ../main main
+	run bash "$WT/wt.sh" rm .bare
+	[ "$status" -ne 0 ]
+	[[ "$output" == *"isn't a branch name"* ]] || false
+	[ -f "$WT_WORKTREE_REPO_LOCATION/.bare/HEAD" ]
+	git -C "$WT_WORKTREE_REPO_LOCATION/main" status >/dev/null
+}
+
+@test "wt rm says so when a branch has no folder and git has no record of one (a typo, say)" {
+	run bash "$WT/wt.sh" rm feature/tpyo
+	[ "$status" -ne 0 ]
+	[[ "$output" == *"there's no worktree for feature/tpyo"* ]] || false
+}
+
+@test "remove_links deletes symlinks the repo tracks too, since git might follow them" {
+	is_windows && skip "Git for Windows checks out tracked symlinks as plain files by default"
+	ln -s .gitignore "$MAIN/ignore-link"
+	git -C "$MAIN" add ignore-link
+	git -C "$MAIN" commit -q -m "add a symlink"
+	merged_branch feature/x
+	folder="$WT_WORKTREE_REPO_LOCATION/feature_x"
+	run bash -c '. "$1" && remove_links "$2"' _ "$WT/wt-common.sh" "$folder"
+	[ "$status" -eq 0 ]
+	[ ! -L "$folder/ignore-link" ]
+	[ ! -L "$folder/node_modules" ]
+}
+
+@test "wt clean deletes a shared link inside a branch folder's own node_modules, not what it points to" {
+	mkdir -p "$MAIN/node_modules/.cache"
+	echo data > "$MAIN/node_modules/.cache/build.json"
+	export WT_SYMLINK_PAIRS=node_modules/.cache
+	merged_branch feature/done
+	folder="$WT_WORKTREE_REPO_LOCATION/feature_done"
+	# This branch folder has its own node_modules, with only the .cache inside it shared
+	rm -f "$folder/node_modules"
+	mkdir -p "$folder/node_modules/dep"
+	link_dir "$MAIN/node_modules/.cache" "$folder/node_modules/.cache"
+	run bash "$WT/wt.sh" clean --apply
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"GONE"*"feature_done"* ]] || false
+	[ -f "$MAIN/node_modules/.cache/build.json" ]
+}
+
+@test "wt clean puts back symlinks the repo tracks when git refuses to remove the folder" {
 	is_windows && skip "Git for Windows checks out tracked symlinks as plain files by default"
 	ln -s .gitignore "$MAIN/ignore-link"
 	git -C "$MAIN" add ignore-link
