@@ -191,6 +191,28 @@ loads_cleanly() {
 	[ ! -e "$HOME/code/shop/main" ]
 }
 
+# macOS's temp folder ends in /, so its paths can have a // that cd tidies away
+@test "on Windows, stops before moving a clone that the terminal is inside, however its path is spelled" {
+	export WT_SETUP_OS=MINGW64_NT-10.0
+	export HOME="$BATS_TEST_TMPDIR//home"
+	git clone -q "$REMOTE" "$HOME/code/shop"
+	cd "$HOME/code/shop"
+	setup_with "$REMOTE" acme/shop "" y
+	[ "$status" -ne 0 ]
+	[[ "$output" == *"Windows can't move a folder that's in use"* ]] || false
+	[ ! -e "$HOME/code/shop/main" ]
+}
+
+@test "after moving a clone that the terminal is inside, says to cd into main" {
+	export HOME="$BATS_TEST_TMPDIR//home"
+	git clone -q "$REMOTE" "$HOME/code/shop"
+	cd "$HOME/code/shop"
+	setup_with "$REMOTE" acme/shop "" y "" "" "" "" y
+	[ "$status" -eq 0 ]
+	[ -d "$HOME/code/shop/main/.git" ]
+	[[ "$output" == *"This terminal is still in the clone's old folder"* ]] || false
+}
+
 @test "refuses a folder that already has other files in it" {
 	mkdir -p "$HOME/code/shop"
 	touch "$HOME/code/shop/notes.txt"
