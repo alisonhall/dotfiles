@@ -96,10 +96,10 @@ if [ "$ALL" -eq 1 ]; then
 			branch\ *)   wt_branch="${line#branch refs/heads/}" ;;
 			bare)        wt_bare=1 ;;
 			"" )
-				# End of a record. Skip the bare repo and the main worktree
-				# (main is the source of the symlinks).
+				# End of a record. Skip the bare repo and the main folder, whatever
+				# branch it holds (it's the source of the symlinks).
 				if [ -n "${wt_path:-}" ] && [ -d "$wt_path" ] \
-					&& [ "${wt_bare:-0}" -eq 0 ] && [ "${wt_branch:-}" != "main" ]; then
+					&& [ "${wt_bare:-0}" -eq 0 ] && ! [ "$wt_path" -ef "$MAIN_WT" ]; then
 					targets+=("$wt_path")
 				fi
 				wt_path=""; wt_branch=""; wt_bare=0

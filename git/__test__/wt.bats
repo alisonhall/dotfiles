@@ -575,3 +575,12 @@ deleted_after_merge() {
 	[ "${lines[0]}" = "wt: function" ]
 	[ "${lines[1]}" -ef "$WT" ]
 }
+
+@test "wt link --all leaves out the main folder, whatever branch it holds" {
+	git -C "$MAIN" switch -q -c develop
+	bash "$WT/wt.sh" add feature/x >/dev/null 2>&1
+	run bash "$WT/wt.sh" link --check --all --no-workspaces
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"Worktree: feature_x"* ]] || false
+	[[ "$output" != *"Worktree: main"* ]] || false
+}

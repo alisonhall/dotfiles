@@ -67,6 +67,8 @@ loads_cleanly() {
 	grep -qF 'WT_WORKTREE_REPO_LOCATION="$HOME/code/shop" \' "$HOME/.bashrc"
 	grep -qF 'WT_REPO_SLUG="acme/shop" \' "$HOME/.bashrc"
 	grep -qF 'CURRENT_DEV_BRANCH="develop" \' "$HOME/.bashrc"
+	# (wt clean protects CURRENT_DEV_BRANCH itself, so it isn't repeated in WT_PROTECTED_BRANCHES)
+	[ "$(grep -c WT_PROTECTED_BRANCHES "$HOME/.bashrc")" -eq 0 ]
 	loads_cleanly "$HOME/.bashrc"
 	# On Linux, terminals read ~/.bashrc themselves
 	[ ! -e "$HOME/.bash_profile" ]
