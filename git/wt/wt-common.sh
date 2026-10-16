@@ -47,9 +47,10 @@ fetch_pr_head() {
 	return 1
 }
 
-# wt_is_windows: Whether this is Git Bash (or another Unix layer) on Windows
+# wt_is_windows: Whether this is Git Bash (or another Unix layer) on Windows. Tests set WT_OS to
+# act as if on another system.
 wt_is_windows() {
-	case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) return 0 ;; esac
+	case "${WT_OS:-$(uname -s)}" in MINGW* | MSYS* | CYGWIN*) return 0 ;; esac
 	return 1
 }
 
@@ -79,14 +80,24 @@ make_link() {
 # program is using it (an editor, or a terminal that's in it). Deleting it would fail partway
 # and leave it half deleted, so this checks by renaming it and back, which either works or
 # fails as a whole. Never true on other systems, which allow deleting folders in use.
+#
+# Returns 0 if it's in use, 1 if it isn't, and 2 if it was renamed but couldn't be renamed
+# back, even after retrying (antivirus or the search indexer can hold a folder for a moment).
+# Then it says where the folder is, and how to put it back.
 folder_in_use() {
-	local probe="$1.wt-in-use-check-$$"
+	local probe="$1.wt-in-use-check-$$" tries=0
 	wt_is_windows || return 1
 	mv "$1" "$probe" 2>/dev/null || return 0
-	if ! mv "$probe" "$1" 2>/dev/null; then
-		echo "wt: couldn't rename $probe back to $1" >&2
-		return 0
-	fi
+	until mv "$probe" "$1" 2>/dev/null; do
+		tries=$((tries + 1))
+		if [ "$tries" -ge 6 ]; then
+			echo "wt: while checking whether $(basename "$1") was in use, it was renamed to" >&2
+			echo "    $probe, and Windows won't let it be renamed back yet. Nothing in it was deleted." >&2
+			echo "    Put it back with: mv \"$probe\" \"$1\"" >&2
+			return 2
+		fi
+		sleep 0.5
+	done
 	return 1
 }
 
@@ -94,11 +105,17 @@ folder_in_use() {
 # worktree folder, leaving what they point at alone. Run it before deleting the folder: on
 # Windows, `git worktree remove` follows junctions and deletes everything inside the folders
 # they point to, such as main/node_modules. (rm -r doesn't, but this protects either way.)
+#
+# It doesn't look inside a real node_modules folder (one installed in this folder, rather than
+# a link to main's): that's slow on Windows, and the links in one point within this folder, so
+# following them only reaches files that are being deleted anyway. It also leaves symlinks the
+# repo itself tracks, which git removes as files, so the folder stays intact if git refuses.
 remove_links() {
 	local link
 	while IFS= read -r link; do
+		git -C "$1" ls-files --error-unmatch -- "${link#"$1"/}" >/dev/null 2>&1 && continue
 		rm -f "$link"
-	done < <(find "$1" -name .git -prune -o -type l -print 2>/dev/null)
+	done < <(find "$1" \( -name .git -o \( -name node_modules ! -type l \) \) -prune -o -type l -print 2>/dev/null)
 }
 
 # Re-point the @scope/* workspace packages to THIS worktree's source (the root

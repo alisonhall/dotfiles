@@ -216,10 +216,112 @@ merged_branch() {
 	[ -f "$MAIN/node_modules/pkg/index.js" ]
 }
 
-@test "wt rm says so when the branch has no folder" {
-	run bash "$WT/wt.sh" rm feature/nothing
+@test "wt rm removes git's record of a branch folder that was already deleted" {
+	merged_branch feature/gone
+	rm -rf "$WT_WORKTREE_REPO_LOCATION/feature_gone"
+	run bash "$WT/wt.sh" rm feature/gone
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"there's no folder feature_gone"* ]] || false
+	[[ "$(git -C "$MAIN" worktree list)" != *feature_gone* ]] || false
+}
+
+@test "wt rm won't delete the main folder" {
+	run bash "$WT/wt.sh" rm main
 	[ "$status" -ne 0 ]
-	[[ "$output" == *"there's no folder feature_nothing"* ]] || false
+	[[ "$output" == *"won't delete the main folder"* ]] || false
+	[ -d "$MAIN/.git" ]
+}
+
+@test "wt rm won't take . or .. as a branch" {
+	for name in . ..; do
+		run bash "$WT/wt.sh" rm "$name"
+		[ "$status" -ne 0 ]
+		[[ "$output" == *"isn't a branch name"* ]] || false
+	done
+	[ -d "$MAIN/.git" ]
+}
+
+@test "wt clean leaves symlinks the repo tracks when git refuses to remove the folder" {
+	is_windows && skip "Git for Windows checks out tracked symlinks as plain files by default"
+	ln -s .gitignore "$MAIN/ignore-link"
+	git -C "$MAIN" add ignore-link
+	git -C "$MAIN" commit -q -m "add a symlink"
+	git -C "$MAIN" push -q origin main
+	merged_branch feature/locked
+	folder="$WT_WORKTREE_REPO_LOCATION/feature_locked"
+	# A locked worktree makes git worktree remove --force refuse
+	git -C "$MAIN" worktree lock "$folder"
+	run bash "$WT/wt.sh" clean --apply
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"KEEP"*"feature_locked"*"refused"* ]] || false
+	[ -L "$folder/ignore-link" ]
+}
+
+@test "wt rm deletes a branch folder that has its own node_modules installed" {
+	merged_branch feature/own
+	folder="$WT_WORKTREE_REPO_LOCATION/feature_own"
+	rm -f "$folder/node_modules"
+	mkdir -p "$folder/node_modules/dep"
+	echo x > "$folder/node_modules/dep/index.js"
+	run bash "$WT/wt.sh" rm feature/own
+	[ "$status" -eq 0 ]
+	[ ! -e "$folder" ]
+	[ -f "$MAIN/node_modules/pkg/index.js" ]
+}
+
+# fail_rename_back <times>: An mv that fails to rename a folder back after wt's in-use check,
+# the first <times> times, as antivirus or the search indexer holding it for a moment would
+fail_rename_back() {
+	local real_mv
+	real_mv="$(command -v mv)"
+	cat > "$BATS_TEST_TMPDIR/bin/mv" <<-EOF
+		#!/usr/bin/env bash
+		case "\$1" in
+			*.wt-in-use-check-*)
+				count="\$(cat "$BATS_TEST_TMPDIR/mv-fails" 2>/dev/null || echo 0)"
+				if [ "\$count" -lt $1 ]; then
+					echo \$((count + 1)) > "$BATS_TEST_TMPDIR/mv-fails"
+					echo "mv: Permission denied" >&2
+					exit 1
+				fi
+				;;
+		esac
+		exec "$real_mv" "\$@"
+	EOF
+	chmod +x "$BATS_TEST_TMPDIR/bin/mv"
+}
+
+@test "on Windows, the in-use check tries again when a folder can't be renamed back straight away" {
+	export WT_OS=MINGW64_NT-10.0
+	merged_branch feature/done
+	fail_rename_back 2
+	run bash "$WT/wt.sh" rm feature/done
+	[ "$status" -eq 0 ]
+	[ ! -e "$WT_WORKTREE_REPO_LOCATION/feature_done" ]
+	[ -f "$MAIN/node_modules/pkg/index.js" ]
+}
+
+@test "on Windows, wt rm says where a folder is when it can't be renamed back after the in-use check" {
+	export WT_OS=MINGW64_NT-10.0
+	merged_branch feature/done
+	fail_rename_back 99
+	run bash "$WT/wt.sh" rm feature/done
+	[ "$status" -ne 0 ]
+	[[ "$output" == *"Put it back with: mv"* ]] || false
+	# (Not also the message for a folder that's in use, which would be wrong)
+	[[ "$output" != *"is in use by another program"* ]] || false
+	ls -d "$WT_WORKTREE_REPO_LOCATION"/feature_done.wt-in-use-check-*
+	[ -f "$MAIN/node_modules/pkg/index.js" ]
+}
+
+@test "on Windows, wt clean keeps a folder it can't rename back after the in-use check" {
+	export WT_OS=MINGW64_NT-10.0
+	merged_branch feature/done
+	fail_rename_back 99
+	run bash "$WT/wt.sh" clean --apply
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"KEEP"*"feature_done"*"renamed while checking"* ]] || false
+	ls -d "$WT_WORKTREE_REPO_LOCATION"/feature_done.wt-in-use-check-*
 }
 
 @test "on Windows, wt rm deletes nothing from a folder that's in use, rather than half of it" {
@@ -328,4 +430,7 @@ deleted_after_merge() {
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"feature/oops"*"⚠ main folder isn't on main"* ]] || false
 	[[ "$output" == *"branch ≠ folder: 1"* ]] || false
+	# ...and says how to fix it
+	[[ "$output" == *"set"*"CURRENT_DEV_BRANCH"* ]] || false
+	[[ "$output" == *"switch main"* ]] || false
 }

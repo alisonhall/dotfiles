@@ -550,7 +550,9 @@ ask SHARED "Shared files, separated by spaces" "${suggest_shared:--}"
 # Windows limits paths to 260 characters unless git is told otherwise, and node_modules inside a
 # branch folder goes past that easily ("Filename too long")
 LONG_PATHS=0
-if is_windows && [ "$(git config --global --get core.longpaths)" != true ]; then
+# (Any config level counts: Git for Windows' installer can turn it on for the whole system. Asked
+# from / so a repo the script is run in can't answer for every repo.)
+if is_windows && [ "$(cd / && git config --get core.longpaths)" != true ]; then
 	say "Windows limits paths to 260 characters, which deep folders like node_modules can go past"
 	say "in a branch folder, and git then fails with \"Filename too long\"."
 	ask_yes_no "Let git use longer paths, for all your repos (git config --global core.longpaths true)?" y && LONG_PATHS=1

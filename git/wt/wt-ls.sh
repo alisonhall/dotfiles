@@ -480,3 +480,12 @@ printf '  tracked changes: %d   untracked files: %d   missing folders: %d\n' \
 printf '  ahead/behind: %d up to date, %d diverged, %d n/a\n' \
 	"$ab_up_to_date" "$ab_diverged" "$((count - ab_up_to_date - ab_diverged))"
 printf '  branch ≠ folder: %d\n' "$mismatch_count"
+
+# How to fix the main folder holding the wrong branch
+for i in "${!disp_branch[@]}"; do
+	[ "${disp_mismatch[$i]}" = "2" ] || continue
+	printf '\n%s\n' "The main folder should hold $DEV_BRANCH. If the repo's default branch isn't $DEV_BRANCH, set"
+	printf '%s\n' "CURRENT_DEV_BRANCH to it (in the repo's wt command, or exported); otherwise run:"
+	printf '  git -C "%s" switch %s\n' "$MAIN_WT" "$DEV_BRANCH"
+	break
+done
