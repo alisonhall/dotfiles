@@ -249,7 +249,7 @@ The commands are written with `wt`. If you made your own command in [step 2](#2-
 4. The folder has no uncommitted changes, and no new or ignored files other than shared links and build output (`node_modules`, `dist`, `build`, `coverage` and the like).
 5. The branch has no stashes.
 
-`wt clean` lists every folder it keeps, with the reason. Branches in `WT_PROTECTED_BRANCHES` (`main`, unless you change it) are never deleted.
+`wt clean` lists every folder it keeps, with the reason. It never deletes the `main` folder, whatever branch it holds, or branches in `WT_PROTECTED_BRANCHES` (`main`, unless you change it) or `CURRENT_DEV_BRANCH`.
 
 ## Settings
 
@@ -277,7 +277,7 @@ Open a new terminal after changing either file.
 | `WT_REPO_SLUG` | For `wt clean` | | `<repo-owner>/<repo-name>`: the GitHub repo's owner and name |
 | `CURRENT_DEV_BRANCH` | No | `main` | The branch that `wt add` starts new branches from, and that the `main` folder holds (`wt ls` warns if it holds another) |
 | `CURRENT_REMOTE_NAME` | No | `origin` | The git remote that points at GitHub |
-| `WT_PROTECTED_BRANCHES` | No | `main` | Branches `wt clean` never deletes, separated by spaces, like `"main develop"` |
+| `WT_PROTECTED_BRANCHES` | No | `main` | Branches `wt clean` never deletes, separated by spaces, like `"main release"`. `CURRENT_DEV_BRANCH` is always protected too |
 | `WT_SAFE_ARTIFACTS` | No | | More files or folders that `wt clean` may delete along with a branch folder, separated by spaces, like `".cache bundle-analysis.html"`. Use it for generated files your repo ignores, so they don't stop a folder being cleaned |
 | `WT_SYMLINK_PAIRS` | No | | Files or folders that every branch folder should share with `main` rather than have its own copy of, separated by spaces, like `".env .cache"` (see [Shared files](#shared-files-node_modules-env)) |
 

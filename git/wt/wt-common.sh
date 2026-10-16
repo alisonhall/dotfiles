@@ -47,6 +47,17 @@ fetch_pr_head() {
 	return 1
 }
 
+# other_branch_in <folder> <branch>: If the worktree folder holds a branch other than <branch>,
+# prints it and succeeds. Different branches can share a folder name, since / becomes _
+# (feature/x and feature_x are both feature_x/). A detached folder, like one recovered from a
+# merged PR, doesn't count.
+other_branch_in() {
+	local held
+	held="$(git -C "$1" symbolic-ref --quiet --short HEAD 2>/dev/null)" || return 1
+	[ "$held" != "$2" ] || return 1
+	printf '%s' "$held"
+}
+
 # wt_is_windows: Whether this is Git Bash (or another Unix layer) on Windows. Tests set WT_OS to
 # act as if on another system.
 wt_is_windows() {

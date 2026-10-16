@@ -480,3 +480,98 @@ deleted_after_merge() {
 	[[ "$output" == *"set"*"CURRENT_DEV_BRANCH"* ]] || false
 	[[ "$output" == *"switch main"* ]] || false
 }
+
+#   -------------------------------
+#   WT CLEAN AND THE MAIN FOLDER
+#   -------------------------------
+
+@test "wt clean never removes the main folder, whatever branch it holds" {
+	git -C "$MAIN" switch -q -c develop
+	git -C "$MAIN" push -q -u origin develop 2>/dev/null
+	run bash "$WT/wt.sh" clean --apply
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"KEEP  main"*"(the main folder)"* ]] || false
+	[[ "$output" != *"refused"* ]] || false
+	[ -d "$MAIN/.git" ]
+}
+
+@test "wt clean never removes the main folder in the bare-repo layout either" {
+	export WT_WORKTREE_REPO_LOCATION="$BATS_TEST_TMPDIR/bare-layout"
+	git clone -q --bare "$BATS_TEST_TMPDIR/origin.git" "$WT_WORKTREE_REPO_LOCATION/.bare"
+	git -C "$WT_WORKTREE_REPO_LOCATION/.bare" config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'
+	git -C "$WT_WORKTREE_REPO_LOCATION/.bare" fetch -q
+	git -C "$WT_WORKTREE_REPO_LOCATION/.bare" worktree add -q -b develop ../main main
+	git -C "$WT_WORKTREE_REPO_LOCATION/main" push -q -u origin develop 2>/dev/null
+	run bash "$WT/wt.sh" clean --apply
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"(the main folder)"* ]] || false
+	[ -d "$WT_WORKTREE_REPO_LOCATION/main" ]
+	git -C "$WT_WORKTREE_REPO_LOCATION/.bare" rev-parse --verify --quiet refs/heads/develop
+}
+
+@test "wt clean protects CURRENT_DEV_BRANCH, as well as WT_PROTECTED_BRANCHES" {
+	git -C "$MAIN" worktree add -q -b develop "$WT_WORKTREE_REPO_LOCATION/develop"
+	git -C "$WT_WORKTREE_REPO_LOCATION/develop" push -q -u origin develop 2>/dev/null
+	export CURRENT_DEV_BRANCH=develop
+	run bash "$WT/wt.sh" clean --apply
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"protected branch: develop"* ]] || false
+	[ -d "$WT_WORKTREE_REPO_LOCATION/develop" ]
+}
+
+@test "wt clean works when the repo's folder has a space in its path" {
+	export WT_WORKTREE_REPO_LOCATION="$BATS_TEST_TMPDIR/my repo"
+	MAIN="$WT_WORKTREE_REPO_LOCATION/main"
+	git clone -q "$BATS_TEST_TMPDIR/origin.git" "$MAIN" 2>/dev/null
+	mkdir -p "$MAIN/node_modules/pkg"
+	echo 'module.exports = 42' > "$MAIN/node_modules/pkg/index.js"
+	merged_branch feature/done
+	run bash "$WT/wt.sh" clean --apply
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"GONE"*"feature_done"* ]] || false
+	[ ! -e "$WT_WORKTREE_REPO_LOCATION/feature_done" ]
+	[ -f "$MAIN/node_modules/pkg/index.js" ]
+}
+
+#   -------------------------------
+#   BRANCH NAMES AND FOLDERS
+#   -------------------------------
+
+@test "wt add doesn't mistake a branch on GitHub whose name ends the same, like feature/login for login" {
+	git -C "$MAIN" push -q origin main:refs/heads/feature/login 2>/dev/null
+	run bash "$WT/wt.sh" add login
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"Remote branch 'login' not found"* ]] || false
+	[ "$(git -C "$WT_WORKTREE_REPO_LOCATION/login" branch --show-current)" = login ]
+}
+
+@test "wt add and wt cd refuse a folder that holds a different branch with the same folder name" {
+	bash "$WT/wt.sh" add feature/x >/dev/null 2>&1
+	run bash "$WT/wt.sh" add feature_x
+	[ "$status" -ne 0 ]
+	[[ "$output" == *"already holds branch feature/x, not feature_x"* ]] || false
+	run bash "$WT/wt.sh" cd feature_x
+	[ "$status" -ne 0 ]
+	[[ "$output" == *"holds branch feature/x, not feature_x"* ]] || false
+	# The right name still works
+	run bash "$WT/wt.sh" add feature/x
+	[ "$status" -eq 0 ]
+}
+
+#   -------------------------------
+#   THE WT FUNCTION
+#   -------------------------------
+
+@test "wt main says so when WT_WORKTREE_REPO_LOCATION isn't set" {
+	run bash -c 'unset WT_WORKTREE_REPO_LOCATION; . "$1/wt.sh" && wt main' _ "$WT"
+	[ "$status" -eq 2 ]
+	[[ "$output" == *"WT_WORKTREE_REPO_LOCATION is not set"* ]] || false
+}
+
+@test "zsh loads wt even with FUNCTION_ARGZERO off" {
+	command -v zsh >/dev/null 2>&1 || skip "zsh isn't installed"
+	run zsh -f -c 'unsetopt function_argzero; source "$1/wt.sh" && whence -w wt && print -r -- "$WT_DIR"' _ "$WT"
+	[ "$status" -eq 0 ]
+	[ "${lines[0]}" = "wt: function" ]
+	[ "${lines[1]}" -ef "$WT" ]
+}

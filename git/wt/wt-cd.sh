@@ -101,5 +101,11 @@ if [ ! -e "$worktree_path" ]; then
 	exec "$(cd "$(dirname "$0")" && pwd)/wt-add.sh" "$REMOTE_BRANCH_NAME"
 fi
 
+if [ -e "$worktree_path/.git" ] && held="$(other_branch_in "$worktree_path" "$REMOTE_BRANCH_NAME")"; then
+	echo "wt-cd: the folder $LOCAL_BRANCH_NAME holds branch $held, not $REMOTE_BRANCH_NAME"
+	echo "       (/ becomes _ in folder names, so both branches would use that folder)."
+	exit 1
+fi
+
 cd "$worktree_path" || exit 1
 fetch_branch_or_recover
