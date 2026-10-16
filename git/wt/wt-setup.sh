@@ -568,7 +568,6 @@ command_block+="	WT_WORKTREE_REPO_LOCATION=$(quoted "$LOCATION") \\"$'\n'
 [ "$REMOTE" != origin ] && command_block+="	CURRENT_REMOTE_NAME=$(quoted "$REMOTE") \\"$'\n'
 if [ "$DEV_BRANCH" != main ]; then
 	command_block+="	CURRENT_DEV_BRANCH=$(quoted "$DEV_BRANCH") \\"$'\n'
-	command_block+="	WT_PROTECTED_BRANCHES=$(quoted "main $DEV_BRANCH") \\"$'\n'
 fi
 [ -n "$SHARED" ] && command_block+="	WT_SYMLINK_PAIRS=$(quoted "$SHARED") \\"$'\n'
 command_block+='	wt "$@"'$'\n''}'
