@@ -37,6 +37,11 @@ source "$(cd "$(dirname "$0")" && pwd)/wt-common.sh"
 # cascade into cd/ln errors). Re-run = switch into it; stray folder = abort.
 worktree_path="$WT_WORKTREE_REPO_LOCATION/$LOCAL_BRANCH_NAME"
 if [ -e "$worktree_path/.git" ]; then
+	if held="$(other_branch_in "$worktree_path" "$REMOTE_BRANCH_NAME")"; then
+		echo "wt-add: the folder $LOCAL_BRANCH_NAME already holds branch $held, not $REMOTE_BRANCH_NAME"
+		echo "        (/ becomes _ in folder names, so both branches would use that folder)."
+		exit 1
+	fi
 	echo "Worktree folder $LOCAL_BRANCH_NAME already exists. Switching to it..."
 	exit 0
 fi
@@ -45,8 +50,9 @@ if [ -e "$worktree_path" ]; then
 	exit 1
 fi
 
-# Check whether the branch already exists on the remote
-if [ -n "$(git -C "$MAIN_WT" ls-remote --heads "$CURRENT_REMOTE_NAME" "$REMOTE_BRANCH_NAME")" ]; then
+# Check whether the branch already exists on the remote. (The full ref: ls-remote matches a
+# pattern against the end of each ref name, so "login" alone would also match feature/login.)
+if [ -n "$(git -C "$MAIN_WT" ls-remote --heads "$CURRENT_REMOTE_NAME" "refs/heads/$REMOTE_BRANCH_NAME")" ]; then
 	echo "Remote branch '$REMOTE_BRANCH_NAME' found on $CURRENT_REMOTE_NAME. Creating worktree tracking it..."
 	# Fetch the branch so the local remote-tracking ref ($CURRENT_REMOTE_NAME/$REMOTE_BRANCH_NAME)
 	# exists; git worktree add cannot resolve a remote branch that has not been fetched yet.

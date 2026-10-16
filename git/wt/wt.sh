@@ -20,12 +20,14 @@
 # (zsh 5.9 rejects ${.sh.file} as a bad substitution, so we don't use it.)
 _wt_sourced=0
 if [ -n "${ZSH_VERSION:-}" ]; then
-  # zsh: $0 is the sourced file path; ZSH_EVAL_CONTEXT ends in :file when
-  # sourced (toplevel when executed).
+  # zsh: ZSH_EVAL_CONTEXT ends in :file when sourced (toplevel when executed).
+  # The %x prompt escape is the file being run, whatever the options; $0 is
+  # only that file while FUNCTION_ARGZERO is on. (In eval, because bash can't
+  # parse it.)
   case "${ZSH_EVAL_CONTEXT:-}" in
     *:file) _wt_sourced=1 ;;
   esac
-  WT_DIR="$(cd "$(dirname "$0")" && pwd)"
+  eval 'WT_DIR="$(cd "$(dirname "${(%):-%x}")" && pwd)"'
 elif [ -n "${BASH_SOURCE[0]:-}" ]; then
   # bash: sourced when BASH_SOURCE[0] differs from $0.
   [ "${BASH_SOURCE[0]}" != "$0" ] && _wt_sourced=1
@@ -45,6 +47,10 @@ if [ "$_wt_sourced" = "1" ]; then
     local sub="$1"; shift
     case "$sub" in
       main)
+        if [ -z "${WT_WORKTREE_REPO_LOCATION:-}" ]; then
+          echo "error: WT_WORKTREE_REPO_LOCATION is not set (see wt help)." >&2
+          return 2
+        fi
         cd "$WT_WORKTREE_REPO_LOCATION/main"
         ;;
       add|cd)

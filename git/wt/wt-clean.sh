@@ -76,8 +76,11 @@ BARE="$REPO_ROOT/.bare"
 MAIN_WT="$REPO_ROOT/main"
 REPO_SLUG="$WT_REPO_SLUG"
 REMOTE_NAME="${CURRENT_REMOTE_NAME:-origin}"
-# Branches that must never be removed (space-separated). Defaults to "main".
+# Branches that must never be removed (space-separated). Defaults to "main", and the branch new
+# branches start from (CURRENT_DEV_BRANCH) is always protected too. (The main folder itself is
+# skipped by path, whatever branch it holds.)
 PROTECTED=(${WT_PROTECTED_BRANCHES:-main})
+[[ -n "${CURRENT_DEV_BRANCH:-}" ]] && PROTECTED+=("$CURRENT_DEV_BRANCH")
 
 # Regenerable build artifacts that are safe to discard on removal (not user
 # work). Gate 5 skips these so a worktree with a real node_modules / build
@@ -146,6 +149,20 @@ git -C "$MAIN_WT" fetch --prune "$REMOTE_NAME" --quiet || echo "warn: fetch fail
 # --- helpers -----------------------------------------------------------------
 # folder_in_use, remove_links, restore_tracked_links
 source "$(cd "$(dirname "$0")" && pwd)/wt-common.sh"
+
+# list_worktrees: Each worktree that has a branch, as "<path><TAB><branch>". Read whole lines:
+# paths can have spaces in them (C:/Users/Jane Doe/...), so they can't be split on whitespace.
+list_worktrees() {
+  local line path="" branch=""
+  while IFS= read -r line; do
+    case "$line" in
+      "worktree "*) path="${line#worktree }"; branch="" ;;
+      "branch refs/heads/"*) branch="${line#branch refs/heads/}" ;;
+      "") [[ -n "$path" && -n "$branch" ]] && printf '%s\t%s\n' "$path" "$branch"; path="" ;;
+    esac
+  done < <(git -C "$MAIN_WT" worktree list --porcelain; echo)
+  return 0
+}
 
 is_protected() {
   local name="$1" p
@@ -316,13 +333,9 @@ kept=0
 # These are NOT lost by deleting a folder (refs/stash is shared and survives
 # branch/folder removal), but we cannot tell which folder they belong to, so we
 # refuse to remove anything until the user reviews them explicitly.
-# refs/stash is shared repo-wide, so any worktree can list it; use the first
-# non-bare worktree (not specifically one named "main").
-ANY_WT=$(git -C "$MAIN_WT" worktree list --porcelain | awk -v bare="$BARE" '/^worktree /{if ($2 != bare) {print $2; exit}}')
-UNATTRIBUTED_STASHES=""
-if [[ -n "$ANY_WT" ]]; then
-  UNATTRIBUTED_STASHES=$(git -C "$ANY_WT" stash list 2>/dev/null | grep -iF "on (no branch):" || true)
-fi
+# refs/stash is shared repo-wide, so any worktree can list it; the main folder
+# is one in both layouts (checked above).
+UNATTRIBUTED_STASHES=$(git -C "$MAIN_WT" stash list 2>/dev/null | grep -iF "on (no branch):" || true)
 if [[ -n "$UNATTRIBUTED_STASHES" ]]; then
   echo "NOTE: found stash(es) not tied to a branch (detached HEAD / renamed branch)."
   printf '%s\n' "$UNATTRIBUTED_STASHES" | sed 's/^/  stash: /'
@@ -340,6 +353,14 @@ while IFS=$'\t' read -r path branch <&3; do
   [[ ! -d "$path" ]] && continue
 
   name=$(basename "$path")
+
+  # Never the main folder: it holds the repo (or, in the bare-repo layout, it's where everything
+  # else is anchored), whatever branch is checked out in it
+  if [[ "$path" -ef "$MAIN_WT" ]]; then
+    printf 'KEEP  %-60s (the main folder)\n' "$name"
+    ((kept++)) || true
+    continue
+  fi
 
   if is_protected "$branch"; then
     printf 'KEEP  %-60s (protected branch: %s)\n' "$name" "$branch"
@@ -417,8 +438,7 @@ while IFS=$'\t' read -r path branch <&3; do
   fi
   ((removed++)) || true
 
-done 3< <(git -C "$MAIN_WT" worktree list --porcelain \
-  | awk '/^worktree /{p=$2} /^branch /{b=$2; sub("refs/heads/","",b); printf "%s\t%s\n", p, b}')
+done 3< <(list_worktrees)
 
 echo
 if (( APPLY )); then
