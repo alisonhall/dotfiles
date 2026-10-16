@@ -144,7 +144,7 @@ gh auth status >/dev/null 2>&1 || { echo "gh is not authenticated. Run: gh auth 
 git -C "$MAIN_WT" fetch --prune "$REMOTE_NAME" --quiet || echo "warn: fetch failed, using cached refs" >&2
 
 # --- helpers -----------------------------------------------------------------
-# folder_in_use, remove_links
+# folder_in_use, remove_links, restore_tracked_links
 source "$(cd "$(dirname "$0")" && pwd)/wt-common.sh"
 
 is_protected() {
@@ -407,6 +407,7 @@ while IFS=$'\t' read -r path branch <&3; do
       fi
       printf 'GONE  %-60s [%s] removed\n' "$name" "$branch"
     else
+      restore_tracked_links "$path"
       printf 'KEEP  %-60s [%s] -> worktree remove refused (dirty?). Run wt link %s to restore its links\n' "$name" "$branch" "$branch"
       ((kept++)) || true
       continue
