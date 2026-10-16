@@ -379,9 +379,18 @@ while IFS=$'\t' read -r path branch <&3; do
   fi
 
   # Safe to remove.
-  if (( APPLY )) && folder_in_use "$path"; then
-    # Windows can't delete a folder a program is using, and would leave it half deleted
+  # Windows can't delete a folder a program is using, and would leave it half deleted
+  in_use=1
+  if (( APPLY )); then
+    folder_in_use "$path" && in_use=0 || in_use=$?
+  fi
+  if (( in_use == 0 )); then
     printf 'KEEP  %-60s [%s] -> in use by another program (an editor, or a terminal in it); close it and run this again\n' "$name" "$branch"
+    ((kept++)) || true
+    continue
+  elif (( in_use == 2 )); then
+    # Renamed while checking, and stuck; folder_in_use said where it is
+    printf 'KEEP  %-60s [%s] -> renamed while checking whether it was in use (see above)\n' "$name" "$branch"
     ((kept++)) || true
     continue
   fi

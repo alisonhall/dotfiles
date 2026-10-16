@@ -298,3 +298,13 @@ loads_cleanly() {
 	[[ "$output" != *"Let git use longer paths"* ]] || false
 	[ -z "$(git config --global --get core.longpaths)" ]
 }
+
+@test "on Windows, doesn't ask about long paths when git's system config allows them" {
+	export WT_SETUP_OS=MINGW64_NT-10.0
+	unset GIT_CONFIG_NOSYSTEM
+	export GIT_CONFIG_SYSTEM="$BATS_TEST_TMPDIR/system-gitconfig"
+	git config --system core.longpaths true
+	fresh_clone
+	[ "$status" -eq 0 ]
+	[[ "$output" != *"Let git use longer paths"* ]] || false
+}
