@@ -458,13 +458,18 @@ else
 	fi
 fi
 
-# Windows can't move a folder that a terminal is in
-if [ "$MODE" = move ] && is_windows; then
-	case "$START_DIR/" in
-		"$MOVE_FROM"/*)
-			die "this terminal is inside $(pretty_path "$MOVE_FROM"), and Windows can't move a folder that's in use. cd out of it, then run this again."
-			;;
+# Whether this terminal is inside the clone being moved. Physical paths, since the two
+# can be spelled differently (a // or a symlink in one).
+IN_MOVED_CLONE=0
+if [ "$MODE" = move ]; then
+	case "$(cd "$START_DIR" && pwd -P)/" in
+		"$(cd "$MOVE_FROM" && pwd -P)"/*) IN_MOVED_CLONE=1 ;;
 	esac
+fi
+
+# Windows can't move a folder that a terminal is in
+if [ "$IN_MOVED_CLONE" = 1 ] && is_windows; then
+	die "this terminal is inside $(pretty_path "$MOVE_FROM"), and Windows can't move a folder that's in use. cd out of it, then run this again."
 fi
 
 # The remote and default branch, from the clone where there is one
@@ -700,9 +705,7 @@ say "Open a new terminal (or run: . $(pretty_path "$STARTUP_FILE")), then try:"
 printf '  %-*s  %s\n' $((${#COMMAND_NAME} + 13)) "$COMMAND_NAME ls" "list the repo's branch folders" \
 	$((${#COMMAND_NAME} + 13)) "$COMMAND_NAME add <branch>" "make a folder for a branch and go to it" \
 	$((${#COMMAND_NAME} + 13)) "$COMMAND_NAME help" "everything else"
-if [ "$MODE" = move ]; then
-	case "$START_DIR/" in
-		"$MOVE_FROM"/*) say "This terminal is still in the clone's old folder. Run: cd $(quoted "$MAIN")" ;;
-	esac
+if [ "$IN_MOVED_CLONE" = 1 ]; then
+	say "This terminal is still in the clone's old folder. Run: cd $(quoted "$MAIN")"
 fi
 [ "$GH_READY" = 1 ] || say "Install the GitHub CLI and run gh auth login before using $COMMAND_NAME clean."
