@@ -92,7 +92,17 @@ alias goto-sites='cd "$SITES_DIR"'
 alias goto-local='cd "$DOTFILES/local"'
 alias open-dotfiles='code "$DOTFILES"'
 alias open-profile='code "$DOTFILES"'
-alias open-local='code "$DOTFILES/local/shell_local.sh"'
+# open-local: Opens whichever shell_local file is actually in use - local/shell_local.sh, or
+# ~/.shell_local if you'd rather keep it there (e.g. you declined install.sh's offer to move it)
+open-local () {
+	if [ -f "$DOTFILES/local/shell_local.sh" ]; then
+		code "$DOTFILES/local/shell_local.sh"
+	elif [ -f "$HOME/.shell_local" ]; then
+		code "$HOME/.shell_local"
+	else
+		code "$DOTFILES/local/shell_local.sh"
+	fi
+}
 alias open-gitconfig='code ~/.gitconfig "$DOTFILES/git/gitconfig" "$DOTFILES/local/gitconfig"'
 
 # update-dotfiles: Pull the latest dotfiles and reload them

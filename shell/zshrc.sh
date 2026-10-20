@@ -77,14 +77,22 @@ done
 unset p10k_theme
 
 # Prompt settings: local/p10k.zsh if this machine has its own (`p10k configure` writes one;
-# copy/move it there), otherwise the shared one
+# copy/move it there - or ~/.p10k.zsh works too, e.g. if install.sh's offer to move it there was
+# declined), otherwise the shared one
 if [ -f "$DOTFILES/local/p10k.zsh" ]; then
 	source "$DOTFILES/local/p10k.zsh"
+elif [ -f "$HOME/.p10k.zsh" ]; then
+	source "$HOME/.p10k.zsh"
 else
 	source "$DOTFILES/config/p10k.zsh"
 fi
 
-# This machine's settings - loaded last so they override everything above
-[ -f "$DOTFILES/local/shell_local.sh" ] && source "$DOTFILES/local/shell_local.sh"
+# This machine's settings - loaded last so they override everything above. local/shell_local.sh,
+# or ~/.shell_local if you'd rather keep it there
+if [ -f "$DOTFILES/local/shell_local.sh" ]; then
+	source "$DOTFILES/local/shell_local.sh"
+elif [ -f "$HOME/.shell_local" ]; then
+	source "$HOME/.shell_local"
+fi
 
 dotfiles_welcome

@@ -159,6 +159,13 @@ checksum() { cksum < "$1"; }
 	[[ "$output" == *"PROBLEM: $HOME/.zshrc has a '$START' line without a matching"* ]] || false
 }
 
+@test "check_startup_files --check: syntax-checks ~/.shell_local when LOCAL_DIR's doesn't exist" {
+	printf 'export NAME=Me\nif [ -n "$NAME" ' > "$HOME/.shell_local" # missing ]; then ...; fi
+	MODE_FLAG=--check call check_startup_files
+	[[ "$output" == *"$HOME/.shell_local has a bash syntax error"* ]] || false
+	[[ "$output" == *"$HOME/.shell_local has a zsh syntax error"* ]] || false
+}
+
 #   -------------------------------
 #   setup_local_dir
 #   -------------------------------
@@ -356,6 +363,43 @@ checksum() { cksum < "$1"; }
 	printf '[include]\n\tpath = %s\n[user]\n\temail = me@example.com\n' "$SHARED_INCLUDE" > "$HOME/.gitconfig"
 	MODE_FLAG=--check call check_gitconfig
 	[[ "$output" != *"isn't at the top"* ]] || false
+}
+
+#   -------------------------------
+#   check_reminders: falls back to the legacy ~/.* paths
+#   -------------------------------
+
+@test "check_reminders: flags ~/.shell_local as the unedited template when LOCAL_DIR's doesn't exist" {
+	cp "$REPO/local.example.sh" "$HOME/.shell_local"
+	call check_reminders
+	[[ "$output" == *"$HOME/.shell_local is still the unedited template"* ]] || false
+}
+
+@test "check_reminders: doesn't flag ~/.shell_local once it's been edited" {
+	printf 'export NAME=Me\n' > "$HOME/.shell_local"
+	call check_reminders
+	[[ "$output" != *"is still the unedited template"* ]] || false
+}
+
+@test "check_reminders: finds the blocklist at ~/.dotfiles_blocklist when LOCAL_DIR's doesn't exist" {
+	printf 'something@example.com\n' > "$HOME/.dotfiles_blocklist"
+	call check_reminders
+	[[ "$output" != *"has no entries"* ]] || false
+}
+
+@test "check_reminders: reports the blocklist missing by its legacy path, not LOCAL_DIR's" {
+	call check_reminders
+	[[ "$output" == *"$HOME/.dotfiles_blocklist has no entries"* ]] || false
+}
+
+@test "check_reminders: prefers LOCAL_DIR's shell_local.sh and blocklist when both exist" {
+	mkdir -p "$LOCAL_DIR"
+	printf 'export NAME=Me\n' > "$LOCAL_DIR/shell_local.sh"
+	printf 'something@example.com\n' > "$LOCAL_DIR/dotfiles_blocklist"
+	cp "$REPO/local.example.sh" "$HOME/.shell_local"
+	call check_reminders
+	[[ "$output" != *"is still the unedited template"* ]] || false
+	[[ "$output" != *"has no entries"* ]] || false
 }
 
 #   -------------------------------

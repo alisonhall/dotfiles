@@ -281,6 +281,19 @@ migrate_into_local() {
 	echo "  Moved $old to $new"
 }
 
+# active_local_file <name in $LOCAL_DIR> <legacy path outside the repo>: Echoes whichever of the
+# two currently exists, preferring $LOCAL_DIR - so checks here still find the right file whether a
+# migration was accepted, declined (p10k.zsh, gitconfig - see setup_local_gitconfig), or a file was
+# simply never moved (shell_local.sh, dotfiles_blocklist can be recreated at the legacy path too;
+# nothing requires using $LOCAL_DIR). Falls back to the legacy path if neither exists yet.
+active_local_file() {
+	if [ -f "$LOCAL_DIR/$1" ]; then
+		echo "$LOCAL_DIR/$1"
+	else
+		echo "$2"
+	fi
+}
+
 setup_local_dir() {
 	echo "Local setup:"
 	if [ ! -d "$LOCAL_DIR/.git" ]; then
@@ -795,11 +808,12 @@ check_startup_files() {
 	done
 
 	# A syntax error stops the shell reading the file, so it might never reach the dotfiles block
-	for file in "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.profile" "$HOME/.zshrc" "$LOCAL_DIR/shell_local.sh"; do
+	for file in "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.profile" "$HOME/.zshrc" \
+		"$(active_local_file shell_local.sh "$HOME/.shell_local")"; do
 		[ -f "$file" ] || continue
 		case "$file" in
 			*/.zshrc) shells=zsh ;;
-			*/shell_local.sh) shells="bash zsh" ;;
+			*/shell_local.sh | */.shell_local) shells="bash zsh" ;;
 			*) shells=bash ;;
 		esac
 		for shell in $shells; do
@@ -851,7 +865,7 @@ check_gitconfig() {
 
 check_reminders() {
 	echo "Reminders:"
-	local reminders_shown=0
+	local reminders_shown=0 shell_local blocklist
 
 	# --includes: user.email may be set in $LOCAL_DIR/gitconfig rather than directly in ~/.gitconfig
 	if ! git config --global --includes --get user.email >/dev/null 2>&1; then
@@ -860,8 +874,9 @@ check_reminders() {
 		detail "git config --global user.email \"you@example.com\""
 		reminders_shown=1
 	fi
-	if [ -f "$LOCAL_DIR/shell_local.sh" ] && cmp -s "$LOCAL_DIR/shell_local.sh" "$DOTFILES/local.example.sh"; then
-		note "$LOCAL_DIR/shell_local.sh is still the unedited template - set your name, email etc. there (run: open-local)"
+	shell_local="$(active_local_file shell_local.sh "$HOME/.shell_local")"
+	if [ -f "$shell_local" ] && cmp -s "$shell_local" "$DOTFILES/local.example.sh"; then
+		note "$shell_local is still the unedited template - set your name, email etc. there (run: open-local)"
 		reminders_shown=1
 	fi
 	# The rest only matter for committing, which needs a git clone
@@ -885,10 +900,13 @@ check_reminders() {
 	fi
 	if [ "$IS_GIT_CLONE" = 0 ]; then
 		:
-	elif [ ! -f "$LOCAL_DIR/dotfiles_blocklist" ] || ! grep -qvE '^[[:space:]]*(#|$)' "$LOCAL_DIR/dotfiles_blocklist"; then
-		note "$LOCAL_DIR/dotfiles_blocklist has no entries. If you commit to this repo from this machine, add"
-		detail "your personal strings (emails, employer names...) or copy the file from another machine."
-		reminders_shown=1
+	else
+		blocklist="$(active_local_file dotfiles_blocklist "$HOME/.dotfiles_blocklist")"
+		if [ ! -f "$blocklist" ] || ! grep -qvE '^[[:space:]]*(#|$)' "$blocklist"; then
+			note "$blocklist has no entries. If you commit to this repo from this machine, add"
+			detail "your personal strings (emails, employer names...) or copy the file from another machine."
+			reminders_shown=1
+		fi
 	fi
 
 	if [ "$reminders_shown" = 0 ]; then

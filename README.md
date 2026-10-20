@@ -34,7 +34,8 @@ The installer doesn't replace your existing config files. It:
 
 - adds a small block to `~/.bashrc`, `~/.bash_profile` and `~/.zshrc` that loads `shell/` from this repo, creating the files if needed. If the block is already there but out of date (e.g. you moved the repo), it's updated in place. If a file has two blocks, or a block with a missing marker line, it stops and asks you to fix it by hand rather than risk deleting your own lines. `~/.bash_profile` is skipped if it, or `~/.profile` on Linux, already loads `~/.bashrc`
 - adds an include for `git/gitconfig` to the top of `~/.gitconfig` and backs up the original first, removing includes of a dotfiles gitconfig that no longer exists. If the include has been moved further down (where it would override your settings above it), it's moved back to the top
-- creates `local/` (see below) with its own git repo, moving your existing `~/.shell_local`, `~/.p10k.zsh`, `~/.dotfiles_blocklist` and the settings below the include in `~/.gitconfig` into it if they exist, or creating `local/shell_local.sh` from [local.example.sh](local.example.sh) if not
+- creates `local/` (see below) with its own git repo, or creates `local/shell_local.sh` from [local.example.sh](local.example.sh) if there's nothing to move yet
+- moves an existing `~/.shell_local` and `~/.dotfiles_blocklist` into `local/` automatically; asks first before moving an existing `~/.p10k.zsh` or the settings below the include in `~/.gitconfig` (defaulting to yes). Say no (or just leave the file where it is) and everything keeps working from its original location - see [Local setup](#local-setup)
 - on macOS, points iTerm at `config/iterm` for its settings
 - installs gitleaks if it's missing (see [Committing](#committing))
 - before changing anything, stops if it's run as root, git is missing, or the repo's shell files have syntax errors or Windows line endings
@@ -44,9 +45,9 @@ The installer doesn't replace your existing config files. It:
 
 | | Shared (in this repo) | This machine only (not in this repo - see [Local setup](#local-setup)) |
 | --- | --- | --- |
-| Shell | `shell/` (see below) | `local/shell_local.sh` |
-| Git | `git/gitconfig`, `git/gitignore_global`, `git/` tools (see below) | `local/gitconfig` |
-| Prompt (zsh) | `config/p10k.zsh` | `local/p10k.zsh`, if present, is used instead |
+| Shell | `shell/` (see below) | `local/shell_local.sh`, or `~/.shell_local` if you'd rather keep it there |
+| Git | `git/gitconfig`, `git/gitignore_global`, `git/` tools (see below) | `local/gitconfig`, or directly in `~/.gitconfig` (below the include) |
+| Prompt (zsh) | `config/p10k.zsh` | `local/p10k.zsh` or `~/.p10k.zsh` - whichever exists is used instead |
 | iTerm (macOS) | `config/iterm/` | |
 | VS Code | `config/vscode/` (not applied automatically - see below) | |
 | Scripts | `bin/` (added to `PATH`) | |
@@ -55,9 +56,13 @@ Put anything personal, work-specific or specific to one computer in the local fi
 
 ### Local setup
 
-`local/` holds everything from the table above that's specific to this machine - shell settings, git identity, the commit-blocklist, an optional prompt override. `install.sh` creates it the first time it runs, as its own git repo (ignored by this one, via `.gitignore`), so it's all in one place and can be versioned, diffed and even backed up to your own private remote, independently of this shared repo. If `~/.shell_local`, `~/.p10k.zsh`, `~/.dotfiles_blocklist` or settings below the include in `~/.gitconfig` already existed from before this folder existed, `install.sh` moves them in automatically the first time.
+`local/` is an optional place to keep everything from the table above that's specific to this machine - shell settings, git identity, the commit-blocklist, an optional prompt override - together, as its own git repo (ignored by this one, via `.gitignore`), so it can be versioned, diffed and even backed up to your own private remote, independently of this shared repo.
 
-`install.sh` adds a second include for `local/gitconfig` to `~/.gitconfig`, right after the shared one (so it still overrides it).
+Nothing requires using it, though: `shell/bashrc.sh` and `shell/zshrc.sh` check `local/shell_local.sh` first and fall back to `~/.shell_local` if that's what you have; `shell/zshrc.sh` does the same for `local/p10k.zsh` vs `~/.p10k.zsh`; and `.githooks/pre-commit` checks `local/dotfiles_blocklist` before falling back to `~/.dotfiles_blocklist`. A gitconfig setting (`user.name`, `user.email`, anything else) works identically whether it's in `local/gitconfig` or directly in `~/.gitconfig` below the include - git doesn't care which.
+
+`install.sh` creates `local/` the first time it runs. It moves an existing `~/.shell_local` and `~/.dotfiles_blocklist` into it automatically (there's no real downside to that move, so it doesn't ask); for `~/.p10k.zsh` and whatever's below the include in `~/.gitconfig`, it asks first, defaulting to yes. Answer no (or just run `install.sh` non-interactively, e.g. in CI) and that file is left exactly where it was, fully supported.
+
+`install.sh` adds a second include for `local/gitconfig` to `~/.gitconfig`, right after the shared one (so it still overrides it), whether or not you accept moving anything into it.
 
 A remote for `local/`'s own history is entirely up to you - `install.sh` never sets one, so push/pull across your machines stays a manual step. Note that `local/gitconfig` and `local/shell_local.sh` can contain real secrets (API tokens, credentials) if you put them there; if you ever push `local/` somewhere, treat that remote with the same care as the secrets themselves, and rotate anything that leaks.
 
@@ -81,7 +86,7 @@ These live in `git/` rather than `bin/` because you run them through a git alias
 | File | Contents |
 | --- | --- |
 | `git/branch-report.sh` | Richer branch status report: remote/PR state (via `gh`), worktree awareness, and squash-merge-aware "in base" detection. Run it with `git branch-report` (`git branch-status` runs `bin/git-branch-status`) |
-| `git/wt/` | A git worktree manager, run as `wt`. Configure it per-repo with a `WT_*`-exporting alias in `local/shell_local.sh`. See [git/wt/README.md](git/wt/README.md), which also covers installing it on its own |
+| `git/wt/` | A git worktree manager, run as `wt`. Configure it per-repo with a `WT_*`-exporting alias in `local/shell_local.sh` (or `~/.shell_local`). See [git/wt/README.md](git/wt/README.md), which also covers installing it on its own |
 
 ### VS Code
 
@@ -109,7 +114,7 @@ Everything in `bin/` is on your `PATH`.
 | `createpdf.sh`, `createallpdfs.sh` | Make a PDF from the images in a folder (or each subfolder). Needs ImageMagick and exiftool |
 | `combinepdfs.sh` | Combine the PDFs in a folder into one. Needs Ghostscript and exiftool |
 | `cleanjpgfilenames.sh` | Remove anything after `.jpg` in file names (e.g. `photo.jpg?w=800`) |
-| `getimagesfromlist.sh` | Download every image URL listed in a published Google Sheet (`IMAGE_LIST_CSV_URL` in `local/shell_local.sh`) |
+| `getimagesfromlist.sh` | Download every image URL listed in a published Google Sheet (`IMAGE_LIST_CSV_URL` in `local/shell_local.sh` or `~/.shell_local`) |
 | `my-debug-env` | Bash debugging helpers: `TRACE=1 BASH_ENV=my-debug-env ./some-script` |
 
 ## Committing
@@ -117,7 +122,7 @@ Everything in `bin/` is on your `PATH`.
 `install.sh` turns on a pre-commit hook that blocks commits containing:
 
 - secrets, found by [gitleaks](https://github.com/gitleaks/gitleaks), which you need to install
-- any string listed in `local/dotfiles_blocklist`, a local list of your own emails, hostnames and similar. Links to this repo on GitHub (from its `origin` remote) are allowed, even though they contain your user name
+- any string listed in `local/dotfiles_blocklist` (or `~/.dotfiles_blocklist`), a local list of your own emails, hostnames and similar. Links to this repo on GitHub (from its `origin` remote) are allowed, even though they contain your user name
 - shell syntax errors or Windows line endings, checked by `tools/check-syntax.sh`
 - paths that only work on one machine, checked by `tools/check-paths.sh`: this repo's own location, absolute paths to its files (use `"$DOTFILES/bin/..."` instead), or a home folder with a user name in it (use `$HOME` or `~`). To allow a line on purpose, add a comment containing `path-check: ignore`
 - things that work on one OS but not another, checked by `tools/check-portability.sh`:

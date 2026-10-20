@@ -17,7 +17,12 @@ alias reload-profile='source ~/.bashrc'     # reload-profile:   Reload the shell
 alias show_options='shopt'                  # show_options:     display bash options settings
 alias cic='bind "set completion-ignore-case on"'    # cic:      Make tab-completion case-insensitive
 
-# This machine's settings - loaded last so they override everything above
-[ -f "$DOTFILES/local/shell_local.sh" ] && source "$DOTFILES/local/shell_local.sh"
+# This machine's settings - loaded last so they override everything above. local/shell_local.sh,
+# or ~/.shell_local if you'd rather keep it there
+if [ -f "$DOTFILES/local/shell_local.sh" ]; then
+	source "$DOTFILES/local/shell_local.sh"
+elif [ -f "$HOME/.shell_local" ]; then
+	source "$HOME/.shell_local"
+fi
 
 dotfiles_welcome
