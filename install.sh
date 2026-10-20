@@ -272,8 +272,8 @@ ask_yes_no() {
 migrate_into_local() {
 	local old="$1" new="$2"
 	[ -f "$old" ] && [ ! -f "$new" ] || return 0
-	if [ "${3:-}" = --confirm ] && ! ask_yes_no "  Move $old into $new?" y; then
-		echo "  Leaving $old where it is"
+	if [ "${3:-}" = --confirm ] && ! ask_yes_no "  Move $old into $new, so it's versioned with everything else there?" y; then
+		echo "  Leaving $old where it is - still used from there, just not versioned with $LOCAL_DIR"
 		return 0
 	fi
 	mkdir -p "$(dirname "$new")"
@@ -548,7 +548,8 @@ setup_local_gitconfig() {
 		unset_include_in_file "$gitconfig.tmp-local" "$shared_include_path"
 		strip_shared_include_header "$gitconfig.tmp-local"
 
-		if [ -s "$gitconfig.tmp-local" ] && ask_yes_no "  Move $gitconfig's personal settings into $local_gitconfig?" y; then
+		if [ -s "$gitconfig.tmp-local" ] &&
+			ask_yes_no "  Move $gitconfig's personal settings into $local_gitconfig, so they're versioned with everything else there?" y; then
 			mv "$gitconfig.tmp-local" "$local_gitconfig"
 			cp "$gitconfig" "$gitconfig.local-migration.bak.$TIMESTAMP"
 			# Everything but the shared include was just moved out, so replace the whole file with
@@ -558,7 +559,8 @@ setup_local_gitconfig() {
 				"$shared_include_path" > "$gitconfig"
 			echo "  Moved $gitconfig's personal settings into $local_gitconfig"
 		else
-			[ -s "$gitconfig.tmp-local" ] && echo "  Leaving $gitconfig's personal settings where they are"
+			[ -s "$gitconfig.tmp-local" ] &&
+				echo "  Leaving $gitconfig's personal settings where they are - still used from there, just not versioned with $LOCAL_DIR"
 			rm -f "$gitconfig.tmp-local"
 			: > "$local_gitconfig"
 		fi
