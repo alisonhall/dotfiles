@@ -22,6 +22,9 @@ fi
 set -euo pipefail
 
 DOTFILES="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Everything personal/machine-specific, as its own git repo (see setup_local_dir). Overridable so
+# tests never touch this repo's own local/ folder.
+LOCAL_DIR="${DOTFILES_LOCAL_DIR:-$DOTFILES/local}"
 MARKER_START="# >>> dotfiles >>>"
 MARKER_END="# <<< dotfiles <<<"
 TIMESTAMP="$(date +%Y%m%d%H%M%S)"
@@ -236,6 +239,92 @@ check_locations() {
 }
 
 #   -------------------------------
+#   LOCAL SETUP (this machine's own files)
+#   -------------------------------
+#
+# $LOCAL_DIR holds everything personal/machine-specific (shell settings, the blocklist, a p10k
+# override) as its own git repo, ignored by this one (see .gitignore), so it's all in one place
+# and can be versioned, diffed and backed up independently of the shared repo - e.g. to your own
+# private remote. Nothing here needs you to have done that first: a plain, remote-less repo works
+# fine as just a local history.
+
+# ask_yes_no <question> <default: y|n>: Prompts and returns 0 for yes, 1 for no. If there's no
+# input to read (closed/empty stdin - install.sh sourced non-interactively in tests, or run from a
+# script), takes the default immediately rather than blocking.
+ask_yes_no() {
+	local question="$1" default="${2:-n}" answer
+	while :; do
+		printf '%s (y/n) [%s]: ' "$question" "$default" >&2
+		IFS= read -r answer || answer="$default"
+		answer="${answer:-$default}"
+		case "$answer" in
+			[Yy]*) return 0 ;;
+			[Nn]*) return 1 ;;
+		esac
+		echo "  Please answer y or n." >&2
+	done
+}
+
+# migrate_into_local <old file outside the repo> <new file in $LOCAL_DIR> [--confirm]: Moves a
+# per-machine file into $LOCAL_DIR the first time (does nothing once it's already there, or if
+# there's nothing to move). With --confirm, asks first (defaulting to yes) - used for anything
+# besides shell_local.sh/dotfiles_blocklist, which are always safe to move without asking.
+migrate_into_local() {
+	local old="$1" new="$2"
+	[ -f "$old" ] && [ ! -f "$new" ] || return 0
+	if [ "${3:-}" = --confirm ] && ! ask_yes_no "  Move $old into $new?" y; then
+		echo "  Leaving $old where it is"
+		return 0
+	fi
+	mkdir -p "$(dirname "$new")"
+	mv "$old" "$new"
+	echo "  Moved $old to $new"
+}
+
+setup_local_dir() {
+	echo "Local setup:"
+	if [ ! -d "$LOCAL_DIR/.git" ]; then
+		mkdir -p "$LOCAL_DIR"
+		git init -q "$LOCAL_DIR"
+		printf '.DS_Store\n*.bak.*\n' > "$LOCAL_DIR/.gitignore"
+		echo "  Created $LOCAL_DIR with its own git repo for this machine's files"
+	fi
+
+	migrate_into_local "$HOME/.shell_local" "$LOCAL_DIR/shell_local.sh"
+	migrate_into_local "$HOME/.p10k.zsh" "$LOCAL_DIR/p10k.zsh" --confirm
+	migrate_into_local "$HOME/.dotfiles_blocklist" "$LOCAL_DIR/dotfiles_blocklist"
+
+	if [ ! -f "$LOCAL_DIR/shell_local.sh" ]; then
+		cp "$DOTFILES/local.example.sh" "$LOCAL_DIR/shell_local.sh"
+		echo "  Created $LOCAL_DIR/shell_local.sh from local.example.sh - fill it in for this machine"
+	fi
+	if [ ! -f "$LOCAL_DIR/dotfiles_blocklist" ]; then
+		cat > "$LOCAL_DIR/dotfiles_blocklist" <<'EOF'
+# Strings that must never be committed to the public dotfiles repo.
+# One per line, case-insensitive, matched literally (not regex).
+# e.g. personal and work email addresses, employer/client names,
+# server hostnames, IP addresses, your home folder name.
+EOF
+		echo "  Created $LOCAL_DIR/dotfiles_blocklist - add personal strings the pre-commit hook should block"
+	fi
+
+	commit_local_changes "Set up $(basename "$LOCAL_DIR")"
+}
+
+# commit_local_changes <message>: Commits whatever's pending in $LOCAL_DIR, if anything - e.g. after
+# setup_local_dir creates it, or after setup_git adds $LOCAL_DIR/gitconfig to it later. Falls back to
+# a generic identity so the commit doesn't depend on git user.name/email being set up yet.
+commit_local_changes() {
+	[ -d "$LOCAL_DIR/.git" ] || return 0
+	[ -n "$(git -C "$LOCAL_DIR" status --porcelain 2>/dev/null)" ] || return 0
+	git -C "$LOCAL_DIR" add -A
+	git -C "$LOCAL_DIR" \
+		-c user.name="$(git config --global user.name 2>/dev/null || id -un)" \
+		-c user.email="$(git config --global user.email 2>/dev/null || echo "$(id -un)@localhost")" \
+		commit -q -m "$1"
+}
+
+#   -------------------------------
 #   SHELL
 #   -------------------------------
 
@@ -270,11 +359,6 @@ setup_shell() {
 	setup_bash_profile
 	if zsh_available; then
 		ensure_block "$HOME/.zshrc" "$(shell_block shell/zshrc.sh)"
-	fi
-
-	if [ ! -f "$HOME/.shell_local" ]; then
-		cp "$DOTFILES/local.example.sh" "$HOME/.shell_local"
-		echo "  Created ~/.shell_local from local.example.sh - fill it in for this machine"
 	fi
 }
 
@@ -385,6 +469,30 @@ git_unset_include() {
 	fi
 }
 
+# Like git_unset_include, but targets a specific file instead of the global config. Used while
+# moving settings out of ~/.gitconfig rather than removing a dead include.
+unset_include_in_file() {
+	if git_version_at_least 2 30; then
+		git config --file "$1" --fixed-value --unset include.path "$2" 2>/dev/null || true
+	else
+		git config --file "$1" --unset include.path "^$(printf '%s' "$2" | sed 's/[][\.*^$+?(){}|]/\\&/g')\$" 2>/dev/null || true
+	fi
+}
+
+# Drops the dotfiles' "Shared config..." comment line and collapses a now-empty [include] header,
+# left behind after git_unset_include / unset_include_in_file removes the path under it
+strip_shared_include_header() {
+	local file="$1"
+	grep -vxF '# Shared config from the dotfiles repo. Settings below this override it.' "$file" |
+		awk '
+			pending && /^[[:space:]]*$/ { held = held "\n" $0; next }
+			pending { pending = 0; if ($0 !~ /^[[:space:]]*\[/) print held }
+			/^\[include\][[:space:]]*$/ { pending = 1; held = $0; next }
+			{ print }
+		' > "$file.tmp" || true
+	mv "$file.tmp" "$file"
+}
+
 # shared_include_first <gitconfig> <include path>: Whether the include is the file's first setting
 # (git lists settings in file order)
 shared_include_first() {
@@ -401,15 +509,7 @@ prepend_shared_include() {
 	fi
 	if [ "${3:-}" = --move ]; then
 		git_unset_include "$include_path"
-		# Drop the old comment, and the [include] header if unsetting left it empty
-		grep -vxF '# Shared config from the dotfiles repo. Settings below this override it.' "$gitconfig" |
-			awk '
-				pending && /^[[:space:]]*$/ { held = held "\n" $0; next }
-				pending { pending = 0; if ($0 !~ /^[[:space:]]*\[/) print held }
-				/^\[include\][[:space:]]*$/ { pending = 1; held = $0; next }
-				{ print }
-			' > "$gitconfig.tmp" || true
-		mv "$gitconfig.tmp" "$gitconfig"
+		strip_shared_include_header "$gitconfig"
 	fi
 	{
 		printf '# Shared config from the dotfiles repo. Settings below this override it.\n'
@@ -417,6 +517,44 @@ prepend_shared_include() {
 		[ -f "$gitconfig" ] && cat "$gitconfig"
 	} > "$gitconfig.tmp"
 	mv "$gitconfig.tmp" "$gitconfig"
+}
+
+# Adds a second include for $LOCAL_DIR/gitconfig right after the shared one (so it still
+# overrides it), and the first time $LOCAL_DIR/gitconfig doesn't exist yet, moves whatever was
+# below the shared include into it (user.name, user.email, machine-specific settings), so they're
+# versioned with everything else in $LOCAL_DIR instead of sitting directly in ~/.gitconfig. Called
+# after the shared include is confirmed to be at the top, so "whatever's below it" is well-defined.
+setup_local_gitconfig() {
+	local gitconfig="$1" shared_include_path="$2" local_gitconfig="$LOCAL_DIR/gitconfig"
+	local local_include_path
+	local_include_path="$(native_path "$local_gitconfig")"
+
+	if [ ! -f "$local_gitconfig" ]; then
+		mkdir -p "$LOCAL_DIR"
+		cp "$gitconfig" "$gitconfig.tmp-local"
+		unset_include_in_file "$gitconfig.tmp-local" "$shared_include_path"
+		strip_shared_include_header "$gitconfig.tmp-local"
+
+		if [ -s "$gitconfig.tmp-local" ] && ask_yes_no "  Move $gitconfig's personal settings into $local_gitconfig?" y; then
+			mv "$gitconfig.tmp-local" "$local_gitconfig"
+			cp "$gitconfig" "$gitconfig.local-migration.bak.$TIMESTAMP"
+			# Everything but the shared include was just moved out, so replace the whole file with
+			# a fresh copy of just that - rather than try to subtract it back out of $gitconfig,
+			# which would leave duplicates of anything not exactly matching the include removal.
+			printf '# Shared config from the dotfiles repo. Settings below this override it.\n[include]\n\tpath = %s\n' \
+				"$shared_include_path" > "$gitconfig"
+			echo "  Moved $gitconfig's personal settings into $local_gitconfig"
+		else
+			[ -s "$gitconfig.tmp-local" ] && echo "  Leaving $gitconfig's personal settings where they are"
+			rm -f "$gitconfig.tmp-local"
+			: > "$local_gitconfig"
+		fi
+	fi
+
+	if ! git config --file "$gitconfig" --get-all include.path 2>/dev/null | grep -qxF "$local_include_path"; then
+		git config --file "$gitconfig" --add include.path "$local_include_path"
+		echo "  Added include for this machine's local config ($local_gitconfig) to $gitconfig"
+	fi
 }
 
 # ~/.gitconfig includes the shared config from this repo at the top, so anything
@@ -457,11 +595,14 @@ setup_git() {
 	else
 		echo "  $gitconfig already includes the shared config"
 	fi
+	setup_local_gitconfig "$gitconfig" "$include_path"
 
 	# Point core.excludesfile at the repo's gitignore_global, unless it's set to another file that exists
 	local excludes ours reason=""
 	ours="$(native_path "$DOTFILES/git/gitignore_global")"
-	excludes="$(git config --global --get core.excludesfile 2>/dev/null || true)"
+	# --includes: core.excludesfile may now be set in $LOCAL_DIR/gitconfig rather than directly in
+	# $gitconfig - --global alone only reads $gitconfig's own literal content, not what it includes
+	excludes="$(git config --global --includes --get core.excludesfile 2>/dev/null || true)"
 	if [ -z "$excludes" ]; then
 		reason="it wasn't set"
 	elif [ "$excludes" != "$ours" ] && [ ! -f "${excludes/#\~/$HOME}" ]; then
@@ -473,6 +614,7 @@ setup_git() {
 		git config --global core.excludesfile "$ours"
 		echo "  Set core.excludesfile to the repo's gitignore_global ($reason)"
 	fi
+	commit_local_changes "Add local/gitconfig"
 }
 
 #   -------------------------------
@@ -584,15 +726,6 @@ setup_repo_hooks() {
 	git -C "$DOTFILES" config core.hooksPath .githooks
 	echo "  Enabled pre-commit checks for secrets, personal info and syntax errors"
 	install_gitleaks
-	if [ ! -f "$HOME/.dotfiles_blocklist" ]; then
-		cat > "$HOME/.dotfiles_blocklist" <<'EOF'
-# Strings that must never be committed to the public dotfiles repo.
-# One per line, case-insensitive, matched literally (not regex).
-# e.g. personal and work email addresses, employer/client names,
-# server hostnames, IP addresses, your home folder name.
-EOF
-		echo "  Created ~/.dotfiles_blocklist - add personal strings the pre-commit hook should block"
-	fi
 }
 
 #   -------------------------------
@@ -662,11 +795,11 @@ check_startup_files() {
 	done
 
 	# A syntax error stops the shell reading the file, so it might never reach the dotfiles block
-	for file in "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.profile" "$HOME/.zshrc" "$HOME/.shell_local"; do
+	for file in "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.profile" "$HOME/.zshrc" "$LOCAL_DIR/shell_local.sh"; do
 		[ -f "$file" ] || continue
 		case "$file" in
 			*/.zshrc) shells=zsh ;;
-			*/.shell_local) shells="bash zsh" ;;
+			*/shell_local.sh) shells="bash zsh" ;;
 			*) shells=bash ;;
 		esac
 		for shell in $shells; do
@@ -720,14 +853,15 @@ check_reminders() {
 	echo "Reminders:"
 	local reminders_shown=0
 
-	if ! git config --global --get user.email >/dev/null 2>&1; then
+	# --includes: user.email may be set in $LOCAL_DIR/gitconfig rather than directly in ~/.gitconfig
+	if ! git config --global --includes --get user.email >/dev/null 2>&1; then
 		note "no git user set on this machine. Run:"
 		detail "git config --global user.name \"Your Name\""
 		detail "git config --global user.email \"you@example.com\""
 		reminders_shown=1
 	fi
-	if [ -f "$HOME/.shell_local" ] && cmp -s "$HOME/.shell_local" "$DOTFILES/local.example.sh"; then
-		note "~/.shell_local is still the unedited template - set your name, email etc. there (run: open-local)"
+	if [ -f "$LOCAL_DIR/shell_local.sh" ] && cmp -s "$LOCAL_DIR/shell_local.sh" "$DOTFILES/local.example.sh"; then
+		note "$LOCAL_DIR/shell_local.sh is still the unedited template - set your name, email etc. there (run: open-local)"
 		reminders_shown=1
 	fi
 	# The rest only matter for committing, which needs a git clone
@@ -751,8 +885,8 @@ check_reminders() {
 	fi
 	if [ "$IS_GIT_CLONE" = 0 ]; then
 		:
-	elif [ ! -f "$HOME/.dotfiles_blocklist" ] || ! grep -qvE '^[[:space:]]*(#|$)' "$HOME/.dotfiles_blocklist"; then
-		note "~/.dotfiles_blocklist has no entries. If you commit to this repo from this machine, add"
+	elif [ ! -f "$LOCAL_DIR/dotfiles_blocklist" ] || ! grep -qvE '^[[:space:]]*(#|$)' "$LOCAL_DIR/dotfiles_blocklist"; then
+		note "$LOCAL_DIR/dotfiles_blocklist has no entries. If you commit to this repo from this machine, add"
 		detail "your personal strings (emails, employer names...) or copy the file from another machine."
 		reminders_shown=1
 	fi
@@ -818,6 +952,7 @@ main() {
 	fi
 
 	if [ "$MODE" = install ]; then
+		setup_local_dir
 		setup_shell
 		setup_zsh_prompt
 		setup_git

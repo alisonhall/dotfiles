@@ -1,6 +1,6 @@
 #!/bin/bash
 # Download images from a list of image URLs in a Google spreadsheet
-# The spreadsheet URL comes from IMAGE_LIST_CSV_URL (set it in ~/.shell_local)
+# The spreadsheet URL comes from IMAGE_LIST_CSV_URL (set it in local/shell_local.sh)
 # chmod +x getimagesfromlist.sh
 
 hasDownloadImagesError="false"
@@ -107,7 +107,7 @@ startScript()
 
   # NOTE: Make sure that the Google spreadsheet Sheet is "Published" as a CSV.
   if [ -z "${IMAGE_LIST_CSV_URL:-}" ]; then
-    echo "Set IMAGE_LIST_CSV_URL in ~/.shell_local to the spreadsheet's published CSV URL"
+    echo "Set IMAGE_LIST_CSV_URL in local/shell_local.sh to the spreadsheet's published CSV URL"
     exit 1
   fi
   wget -q -O - "$IMAGE_LIST_CSV_URL" > urls.txt

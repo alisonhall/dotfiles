@@ -8,6 +8,7 @@
 
 status=0
 patterns=()
+repo_root="$(git rev-parse --show-toplevel)"
 
 # 1. Secrets (API keys, tokens, passwords) - https://github.com/gitleaks/gitleaks
 # install.sh may have put it in ~/.local/bin, which GUI git clients don't have on PATH
@@ -25,8 +26,11 @@ else
 	gitleaks protect --staged --redact --no-banner || status=1
 fi
 
-# 2. Personal strings listed in ~/.dotfiles_blocklist (kept outside the repo)
-blocklist="$HOME/.dotfiles_blocklist"
+# 2. Personal strings listed in local/dotfiles_blocklist (that folder is this machine's own git
+# repo, ignored by this one - see install.sh's setup_local_dir). Falls back to the older
+# ~/.dotfiles_blocklist location for a machine that hasn't re-run install.sh since it moved.
+blocklist="$repo_root/local/dotfiles_blocklist"
+[ -f "$blocklist" ] || blocklist="$HOME/.dotfiles_blocklist"
 if [ -f "$blocklist" ]; then
 	patterns=()
 	blocked=""
@@ -60,20 +64,19 @@ if [ -f "$blocklist" ]; then
 				}')" && matches="$filtered"
 		fi
 		if [ -n "$matches" ]; then
-			echo "pre-commit: found strings from ~/.dotfiles_blocklist in staged files:" >&2
+			echo "pre-commit: found strings from $blocklist in staged files:" >&2
 			echo "$matches" >&2
-			echo "  Move these into ~/.shell_local or ~/.gitconfig instead." >&2
+			echo "  Move these into local/shell_local.sh or local/gitconfig instead." >&2
 			status=1
 		fi
 	fi
 fi
 if [ "${#patterns[@]}" -eq 0 ]; then
-	echo "pre-commit: WARNING - ~/.dotfiles_blocklist is missing or empty, so personal strings (emails," >&2
+	echo "pre-commit: WARNING - $blocklist is missing or empty, so personal strings (emails," >&2
 	echo "  employer names...) aren't being checked. Copy it from another machine or add your own." >&2
 fi
 
 # 3. Shell syntax, so a broken file never reaches other machines
-repo_root="$(git rev-parse --show-toplevel)"
 if ! bash "$repo_root/tools/check-syntax.sh" >&2; then
 	echo "pre-commit: fix the errors above before committing." >&2
 	status=1

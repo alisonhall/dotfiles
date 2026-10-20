@@ -6,7 +6,7 @@
 
 if [ -z "${WT_WORKTREE_REPO_LOCATION:-}" ]; then
 	echo "error: WT_WORKTREE_REPO_LOCATION is not set." >&2
-	echo "       Export it in ~/.shell_local (the worktree collection folder, e.g. \$HOME/Sites/fe)." >&2
+	echo "       Export it in local/shell_local.sh (the worktree collection folder, e.g. \$HOME/Sites/fe)." >&2
 	exit 2
 fi
 CURRENT_REMOTE_NAME="${CURRENT_REMOTE_NAME:-origin}"

@@ -1,7 +1,8 @@
-# Template for ~/.shell_local - this machine's personal and machine-specific shell settings.
+# Template for local/shell_local.sh - this machine's personal and machine-specific shell settings.
 #
-# install.sh copies this to ~/.shell_local. That file is NOT in the repo, so anything
-# personal, work-related or specific to one computer goes there:
+# install.sh copies this to local/shell_local.sh (in local/, this machine's own gitignored,
+# independently-versioned folder - see install.sh's setup_local_dir). Anything personal,
+# work-related or specific to one computer goes there:
 #   - values the shared files read (exported variables below)
 #   - work-only aliases and functions, SSH shortcuts, server IPs
 #   - extra PATH entries, tool setup that differs per machine

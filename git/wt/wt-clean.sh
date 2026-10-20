@@ -6,7 +6,7 @@
 # (a bare-repo + linked-worktrees layout) once their branch has been
 # SQUASH-merged into main via a PR.
 #
-# Configuration (exported from ~/.shell_local; nothing is hardcoded here):
+# Configuration (exported from local/shell_local.sh; nothing is hardcoded here):
 #   WT_WORKTREE_REPO_LOCATION  worktree collection folder (e.g. $HOME/Sites/fe)
 #   WT_REPO_SLUG               GitHub repo slug (e.g. owner/repo)
 #   WT_PROTECTED_BRANCHES      space-separated branches never removed (default: main)
@@ -54,16 +54,16 @@ export GH_PAGER=cat
 export PAGER=cat
 
 # Configuration is supplied by the environment (exported from
-# ~/.shell_local, or overridden by a local file). Nothing project- or
+# local/shell_local.sh, or overridden by a local file). Nothing project- or
 # user-specific is hardcoded here, so the script works for any repo/machine.
 if [[ -z "${WT_WORKTREE_REPO_LOCATION:-}" ]]; then
   echo "error: WT_WORKTREE_REPO_LOCATION is not set." >&2
-  echo "       Export it in ~/.shell_local (the worktree collection folder, e.g. \$HOME/Sites/fe)." >&2
+  echo "       Export it in local/shell_local.sh (the worktree collection folder, e.g. \$HOME/Sites/fe)." >&2
   exit 2
 fi
 if [[ -z "${WT_REPO_SLUG:-}" ]]; then
   echo "error: WT_REPO_SLUG is not set." >&2
-  echo "       Export it in ~/.shell_local (the GitHub repo, e.g. owner/repo)." >&2
+  echo "       Export it in local/shell_local.sh (the GitHub repo, e.g. owner/repo)." >&2
   exit 2
 fi
 REPO_ROOT="$WT_WORKTREE_REPO_LOCATION"

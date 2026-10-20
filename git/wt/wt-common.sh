@@ -167,7 +167,7 @@ link_workspaces() {
 # The universal set (node_modules) is always emitted. Project-specific
 # symlinks — including .cache, which not every repo shares — are supplied via
 # WT_SYMLINK_PAIRS (space-separated rel paths, exported from
-# ~/.shell_local); each points at main/<rel>. This keeps the script
+# local/shell_local.sh); each points at main/<rel>. This keeps the script
 # agnostic — no project paths are hardcoded here.
 worktree_symlink_pairs() {
 	local rel

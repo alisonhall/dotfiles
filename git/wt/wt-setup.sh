@@ -489,11 +489,11 @@ fi
 
 heading "Settings"
 
-# Inside this dotfiles repo, personal settings go in ~/.shell_local, which loads after wt does
+# Inside this dotfiles repo, personal settings go in local/shell_local.sh, which loads after wt does
 IN_DOTFILES=0
 if [ -n "${DOTFILES:-}" ] && same_dir "$DOTFILES/git/wt" "$WT_DIR"; then
 	IN_DOTFILES=1
-	default_file="$HOME/.shell_local"
+	default_file="$DOTFILES/local/shell_local.sh"
 else
 	case "${SHELL##*/}" in
 		zsh) default_file="$HOME/.zshrc" ;;
@@ -501,7 +501,7 @@ else
 		*) default_file="" ;;
 	esac
 fi
-[ "$IN_DOTFILES" = 1 ] && say "These dotfiles load wt already, so the command goes in ~/.shell_local."
+[ "$IN_DOTFILES" = 1 ] && say "These dotfiles load wt already, so the command goes in local/shell_local.sh."
 ask_required startup "Startup file to add the command to" "$(pretty_path "$default_file")"
 STARTUP_FILE="$(full_path "$startup")"
 

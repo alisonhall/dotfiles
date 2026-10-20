@@ -18,6 +18,6 @@ alias show_options='shopt'                  # show_options:     display bash opt
 alias cic='bind "set completion-ignore-case on"'    # cic:      Make tab-completion case-insensitive
 
 # This machine's settings - loaded last so they override everything above
-[ -f "$HOME/.shell_local" ] && source "$HOME/.shell_local"
+[ -f "$DOTFILES/local/shell_local.sh" ] && source "$DOTFILES/local/shell_local.sh"
 
 dotfiles_welcome

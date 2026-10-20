@@ -1,2 +1,4 @@
 .DS_Store
 *.bak.*
+# This machine's own files, its own git repo (see install.sh's setup_local_dir)
+/local/

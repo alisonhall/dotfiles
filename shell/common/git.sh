@@ -2,7 +2,7 @@
 # Most git aliases live in git/gitconfig - run `g aliases` to list them.
 #
 # CURRENT_REMOTE_NAME (default: origin) and CURRENT_DEV_BRANCH (default: the remote's
-# default branch, e.g. main) can be set in ~/.shell_local.
+# default branch, e.g. main) can be set in local/shell_local.sh.
 
 alias g='git'
 
@@ -105,7 +105,7 @@ remove-temp-worktree () {
 # wt: git worktree manager (git/wt/) for a collection of worktrees checked out
 # side by side. Project/user-agnostic - it reads WT_* env vars instead of
 # hardcoding anything. There are no shared WT_* defaults here: each repo you
-# manage worktrees for gets its own alias in ~/.shell_local that passes its
+# manage worktrees for gets its own alias in local/shell_local.sh that passes its
 # WT_* values to the `wt` function, e.g.:
 #   alias my-repo-wt="WT_WORKTREE_REPO_LOCATION=\$HOME/Sites/my-repo-worktrees WT_REPO_SLUG=owner/repo wt"
 # `wt help` lists every command and all the WT_* variables.

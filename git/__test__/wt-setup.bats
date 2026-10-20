@@ -112,12 +112,19 @@ loads_cleanly() {
 	[ ! -e "$HOME/.bashrc" ]
 }
 
-@test "in these dotfiles, adds the command to ~/.shell_local, which loads after wt" {
-	export DOTFILES="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
+@test "in these dotfiles, adds the command to local/shell_local.sh, which loads after wt" {
+	# A fake $DOTFILES (not the real repo this test file lives in - wt-setup.sh would otherwise
+	# write into this checkout's own real local/shell_local.sh), with just the one script wt-setup.sh
+	# needs to recognize itself as "these dotfiles" (see same_dir "$DOTFILES/git/wt" "$WT_DIR")
+	FAKE_DOTFILES="$BATS_TEST_TMPDIR/fake-dotfiles"
+	mkdir -p "$FAKE_DOTFILES/git/wt"
+	cp "$SCRIPT" "$FAKE_DOTFILES/git/wt/wt-setup.sh"
+	SCRIPT="$FAKE_DOTFILES/git/wt/wt-setup.sh"
+	export DOTFILES="$FAKE_DOTFILES"
 	fresh_clone
 	[ "$status" -eq 0 ]
-	grep -qxF 'shop-wt() {' "$HOME/.shell_local"
-	[ "$(grep -cF 'wt: load' "$HOME/.shell_local")" -eq 0 ]
+	grep -qxF 'shop-wt() {' "$FAKE_DOTFILES/local/shell_local.sh"
+	[ "$(grep -cF 'wt: load' "$FAKE_DOTFILES/local/shell_local.sh")" -eq 0 ]
 	[ ! -e "$HOME/.bashrc" ]
 }
 

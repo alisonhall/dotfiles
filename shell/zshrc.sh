@@ -76,14 +76,15 @@ for p10k_theme in /opt/homebrew/share/powerlevel10k/powerlevel10k.zsh-theme \
 done
 unset p10k_theme
 
-# Prompt settings: ~/.p10k.zsh if this machine has its own (`p10k configure` writes one), otherwise the shared one
-if [ -f ~/.p10k.zsh ]; then
-	source ~/.p10k.zsh
+# Prompt settings: local/p10k.zsh if this machine has its own (`p10k configure` writes one;
+# copy/move it there), otherwise the shared one
+if [ -f "$DOTFILES/local/p10k.zsh" ]; then
+	source "$DOTFILES/local/p10k.zsh"
 else
 	source "$DOTFILES/config/p10k.zsh"
 fi
 
 # This machine's settings - loaded last so they override everything above
-[ -f "$HOME/.shell_local" ] && source "$HOME/.shell_local"
+[ -f "$DOTFILES/local/shell_local.sh" ] && source "$DOTFILES/local/shell_local.sh"
 
 dotfiles_welcome

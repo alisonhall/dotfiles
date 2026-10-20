@@ -1,7 +1,7 @@
 # Shared by bash and zsh. Loaded by shell/bashrc.sh and shell/zshrc.sh.
 # $DOTFILES is set by the block install.sh adds to ~/.bashrc / ~/.zshrc.
 #
-# Personal and machine-specific settings go in ~/.shell_local (see local.example.sh).
+# Personal and machine-specific settings go in local/shell_local.sh (see local.example.sh).
 # It's loaded after this file, so it can override anything here.
 
 #   -------------------------------
@@ -16,7 +16,7 @@ case "$(uname -s)" in
 	*) export DOTFILES_OS=unknown ;;
 esac
 
-# Defaults - override any of these in ~/.shell_local
+# Defaults - override any of these in local/shell_local.sh
 export NAME="${USER:-$USERNAME}"
 export CURRENT_REMOTE_NAME=origin
 export SITES_DIR="$HOME/Sites"
@@ -51,7 +51,7 @@ fi
 path_add "$HOME/.local/bin" --prepend           # Per-user installs (e.g. gitleaks from install.sh)
 path_add "$DOTFILES/bin" --prepend              # Scripts in this repo
 
-# Tools used by one person or one machine go in the private repo or ~/.shell_local, not here
+# Tools used by one person or one machine go in the private repo or local/shell_local.sh, not here
 # (see local.example.sh)
 
 #   -------------------------------
@@ -89,10 +89,11 @@ unset z_script
 alias goto-dotfiles='cd "$DOTFILES"'
 alias goto-scripts='cd "$DOTFILES/bin"'
 alias goto-sites='cd "$SITES_DIR"'
+alias goto-local='cd "$DOTFILES/local"'
 alias open-dotfiles='code "$DOTFILES"'
 alias open-profile='code "$DOTFILES"'
-alias open-local='code ~/.shell_local'
-alias open-gitconfig='code ~/.gitconfig "$DOTFILES/git/gitconfig"'
+alias open-local='code "$DOTFILES/local/shell_local.sh"'
+alias open-gitconfig='code ~/.gitconfig "$DOTFILES/git/gitconfig" "$DOTFILES/local/gitconfig"'
 
 # update-dotfiles: Pull the latest dotfiles and reload them
 update-dotfiles () {
@@ -120,8 +121,8 @@ print-workspace-variables () {
 	printf '\n'
 }
 
-# Welcome message, shown by bashrc.sh / zshrc.sh after ~/.shell_local is loaded.
-# Turn it off with DOTFILES_WELCOME=false in ~/.shell_local.
+# Welcome message, shown by bashrc.sh / zshrc.sh after local/shell_local.sh is loaded.
+# Turn it off with DOTFILES_WELCOME=false in local/shell_local.sh.
 dotfiles_welcome () {
 	case $- in *i*) ;; *) return 0 ;; esac
 	[ "${DOTFILES_WELCOME:-true}" = true ] || return 0
