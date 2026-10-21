@@ -755,3 +755,17 @@ private_repo_local() {
 	call eval 'setup_local_dir; setup_git; run_local_install; setup_local_links'
 	[ "$(git -C "$LOCAL_DIR" rev-parse HEAD)" = "$head_after_first" ]
 }
+
+@test "local/'s pre-commit hook syntax-checks any staged .sh file, e.g. a private repo's shell/*.sh" {
+	call setup_local_dir
+	mkdir -p "$LOCAL_DIR/profiles/work"
+	printf 'if true; then echo missing-fi\n' > "$LOCAL_DIR/profiles/work/shell.sh"
+	git -C "$LOCAL_DIR" add profiles/work/shell.sh
+	run env SKIP_GITLEAKS=1 bash -c 'cd "$1" && ./.githooks/pre-commit' bats-call "$LOCAL_DIR"
+	[ "$status" -ne 0 ]
+	[[ "$output" == *"bash syntax error in profiles/work/shell.sh"* ]] || false
+	printf 'echo fixed\n' > "$LOCAL_DIR/profiles/work/shell.sh"
+	git -C "$LOCAL_DIR" add profiles/work/shell.sh
+	run env SKIP_GITLEAKS=1 bash -c 'cd "$1" && ./.githooks/pre-commit' bats-call "$LOCAL_DIR"
+	[ "$status" -eq 0 ]
+}

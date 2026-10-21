@@ -576,9 +576,21 @@ else
 	gitleaks protect --staged --redact --no-banner || status=1
 fi
 
-# 2. Shell syntax, so a broken file is never committed
-bash_files=(shell_local.sh secrets.sh)
-zsh_files=(shell_local.sh secrets.sh p10k.zsh)
+# 2. Shell syntax, so a broken file is never committed: the files the dotfiles load from here, and
+# every other staged .sh file (e.g. a private repo's shell/*.sh). secrets.sh is gitignored, so it's
+# checked here even though it's never committed.
+bash_files=()
+for file in shell_local.sh secrets.sh; do
+	[ -f "$file" ] && bash_files+=("$file")
+done
+while IFS= read -r file; do
+	case " ${bash_files[*]} " in
+		*" $file "*) ;;
+		*) bash_files+=("$file") ;;
+	esac
+done < <(git diff --cached --name-only --diff-filter=ACMR -- '*.sh')
+zsh_files=("${bash_files[@]}")
+[ -f p10k.zsh ] && zsh_files+=(p10k.zsh)
 for file in "${bash_files[@]}"; do
 	[ -f "$file" ] || continue
 	if ! output="$(bash -n "$file" 2>&1)"; then
