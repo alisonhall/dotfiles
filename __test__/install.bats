@@ -177,6 +177,9 @@ checksum() { cksum < "$1"; }
 	cmp -s "$LOCAL_DIR/shell_local.sh" "$REPO/local.example.sh"
 	[ -f "$LOCAL_DIR/dotfiles_blocklist" ]
 	[ -f "$LOCAL_DIR/.gitignore" ]
+	[ -f "$LOCAL_DIR/README.md" ]
+	[ -x "$LOCAL_DIR/.githooks/pre-commit" ]
+	[ "$(git -C "$LOCAL_DIR" config --get core.hooksPath)" = .githooks ]
 	# Committed, not left sitting staged/untracked
 	[ -z "$(git -C "$LOCAL_DIR" status --porcelain)" ]
 	[ "$(git -C "$LOCAL_DIR" log --oneline | wc -l | tr -d ' ')" -eq 1 ]
@@ -188,7 +191,9 @@ checksum() { cksum < "$1"; }
 	[[ "$output" == *"Created $LOCAL_DIR as a plain folder"* ]] || false
 	[ -d "$LOCAL_DIR" ]
 	[ ! -d "$LOCAL_DIR/.git" ]
-	[ ! -f "$LOCAL_DIR/.gitignore" ]
+	# Created either way, so the folder is ready to become a repo later with nothing to fill in
+	[ -f "$LOCAL_DIR/.gitignore" ]
+	[ -f "$LOCAL_DIR/README.md" ]
 	[ -f "$LOCAL_DIR/shell_local.sh" ]
 	[ -f "$LOCAL_DIR/dotfiles_blocklist" ]
 }
@@ -198,6 +203,31 @@ checksum() { cksum < "$1"; }
 	call setup_local_dir
 	[ "$status" -eq 0 ]
 	[ ! -d "$LOCAL_DIR/.git" ]
+}
+
+@test "setup_local_dir: creates the pre-commit hook even when LOCAL_DIR is declined as a git repo" {
+	call_answering n setup_local_dir
+	[ "$status" -eq 0 ]
+	[ -x "$LOCAL_DIR/.githooks/pre-commit" ]
+	[[ "$output" != *"Enabled pre-commit checks"* ]] || false
+}
+
+@test "setup_local_dir: wires up the pre-commit hook on a later run if LOCAL_DIR becomes a git repo by hand" {
+	call_answering n setup_local_dir
+	git init -q "$LOCAL_DIR"
+	call setup_local_dir
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"Enabled pre-commit checks"* ]] || false
+	[ "$(git -C "$LOCAL_DIR" config --get core.hooksPath)" = .githooks ]
+}
+
+@test "setup_local_dir: the pre-commit hook has valid bash syntax and flags a shell_local.sh syntax error" {
+	call setup_local_dir
+	bash -n "$LOCAL_DIR/.githooks/pre-commit"
+	printf 'if [ -n "$NAME" ' > "$LOCAL_DIR/shell_local.sh" # missing ]; then ...; fi
+	run env SKIP_GITLEAKS=1 bash -c 'cd "$1" && ./.githooks/pre-commit' bats-call "$LOCAL_DIR"
+	[ "$status" -ne 0 ]
+	[[ "$output" == *"bash syntax error in shell_local.sh"* ]] || false
 }
 
 @test "setup_local_dir: moves an existing ~/.shell_local, ~/.p10k.zsh and ~/.dotfiles_blocklist in" {

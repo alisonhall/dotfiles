@@ -300,12 +300,35 @@ setup_local_dir() {
 		mkdir -p "$LOCAL_DIR"
 		if ask_yes_no "  Set up $LOCAL_DIR as its own git repo, so it's versioned independently of this one?" y; then
 			git init -q "$LOCAL_DIR"
-			printf '.DS_Store\n*.bak.*\n' > "$LOCAL_DIR/.gitignore"
 			echo "  Created $LOCAL_DIR with its own git repo for this machine's files"
 		else
 			echo "  Created $LOCAL_DIR as a plain folder - its files still work, just without their own history, diffs or backups. Run 'git init' in it yourself later if you change your mind."
 		fi
 	fi
+
+	# Created either way, even if the git-repo question above was declined, so the folder is ready
+	# to become a repo later with nothing to fill in by hand.
+	if [ ! -f "$LOCAL_DIR/.gitignore" ]; then
+		printf '.DS_Store\n*.bak.*\n' > "$LOCAL_DIR/.gitignore"
+	fi
+	if [ ! -f "$LOCAL_DIR/README.md" ]; then
+		cat > "$LOCAL_DIR/README.md" <<'EOF'
+# Local setup
+
+Everything in this folder is specific to this machine: shell settings (shell_local.sh), git
+identity and the commit-blocklist (dotfiles_blocklist), and an optional prompt override (p10k.zsh)
+or gitconfig. None of it is tracked by the dotfiles repo itself - see its .gitignore.
+
+If this folder has its own git repo (a .git folder here), its history, diffs and any remote you
+push it to are entirely yours to manage - install.sh never sets a remote for it. If it doesn't,
+nothing here stops working; it just isn't versioned on its own. Turn it into a repo any time by
+running `git init` in this folder.
+
+Created by install.sh - see the "Local setup" section of the dotfiles README for details.
+EOF
+	fi
+
+	setup_local_hooks
 
 	migrate_into_local "$HOME/.shell_local" "$LOCAL_DIR/shell_local.sh"
 	migrate_into_local "$HOME/.p10k.zsh" "$LOCAL_DIR/p10k.zsh" --confirm
@@ -326,6 +349,81 @@ EOF
 	fi
 
 	commit_local_changes "Set up $(basename "$LOCAL_DIR")"
+}
+
+# setup_local_hooks: Creates $LOCAL_DIR/.githooks/pre-commit - secrets (gitleaks) and shell syntax
+# only, unlike the dotfiles repo's own pre-commit: this folder isn't public and is used from one
+# machine, so there's no blocklist or cross-OS check to run. Wires it up with core.hooksPath if
+# $LOCAL_DIR is a git repo yet (it might not be - see setup_local_dir); if you `git init` it
+# yourself later, the next run of install.sh wires it up then.
+setup_local_hooks() {
+	mkdir -p "$LOCAL_DIR/.githooks"
+	if [ ! -f "$LOCAL_DIR/.githooks/pre-commit" ]; then
+		cat > "$LOCAL_DIR/.githooks/pre-commit" <<'EOF'
+#!/usr/bin/env bash
+#
+# Checks staged changes in this folder for secrets and shell syntax errors before they're
+# committed. This folder is personal and used from one machine, so unlike the dotfiles repo's own
+# pre-commit hook, there's no blocklist or cross-OS check here.
+#
+# Bypass gitleaks for one commit: SKIP_GITLEAKS=1 git commit ...
+
+status=0
+
+# 1. Secrets (API keys, tokens, passwords) - https://github.com/gitleaks/gitleaks
+# install.sh may have put it in ~/.local/bin, which GUI git clients don't have on PATH
+PATH="$PATH:$HOME/.local/bin"
+if [ -n "${SKIP_GITLEAKS:-}" ]; then
+	:
+elif ! command -v gitleaks >/dev/null 2>&1; then
+	echo "pre-commit: gitleaks isn't installed, so staged changes can't be scanned for secrets." >&2
+	echo "  Run the dotfiles repo's install.sh to install it, or commit with SKIP_GITLEAKS=1" >&2
+	status=1
+elif gitleaks git --help >/dev/null 2>&1; then
+	gitleaks git --staged --redact --no-banner || status=1
+else
+	# gitleaks before v8.19 (e.g. older Linux distro packages)
+	gitleaks protect --staged --redact --no-banner || status=1
+fi
+
+# 2. Shell syntax, so a broken file is never committed
+bash_files=(shell_local.sh)
+zsh_files=(shell_local.sh p10k.zsh)
+for file in "${bash_files[@]}"; do
+	[ -f "$file" ] || continue
+	if ! output="$(bash -n "$file" 2>&1)"; then
+		echo "pre-commit: bash syntax error in $file:" >&2
+		echo "$output" | sed 's/^/  /' >&2
+		status=1
+	fi
+done
+if command -v zsh >/dev/null 2>&1; then
+	for file in "${zsh_files[@]}"; do
+		[ -f "$file" ] || continue
+		if ! output="$(zsh -n "$file" 2>&1)"; then
+			echo "pre-commit: zsh syntax error in $file:" >&2
+			echo "$output" | sed 's/^/  /' >&2
+			status=1
+		fi
+	done
+fi
+
+# 3. gitconfig syntax
+if [ -f gitconfig ] && ! git config --file gitconfig --list >/dev/null 2>&1; then
+	echo "pre-commit: gitconfig has invalid syntax - run 'git config --file gitconfig --list' to see the error" >&2
+	status=1
+fi
+
+exit $status
+EOF
+		chmod +x "$LOCAL_DIR/.githooks/pre-commit"
+	fi
+
+	if [ -d "$LOCAL_DIR/.git" ] &&
+		[ "$(git -C "$LOCAL_DIR" config --get core.hooksPath 2>/dev/null || true)" != .githooks ]; then
+		git -C "$LOCAL_DIR" config core.hooksPath .githooks
+		echo "  Enabled pre-commit checks (secrets, shell syntax) for $LOCAL_DIR"
+	fi
 }
 
 # commit_local_changes <message>: Commits whatever's pending in $LOCAL_DIR, if anything - e.g. after

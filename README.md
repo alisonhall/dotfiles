@@ -60,7 +60,7 @@ Put anything personal, work-specific or specific to one computer in the local fi
 
 Nothing requires using it, though: `shell/bashrc.sh` and `shell/zshrc.sh` check `local/shell_local.sh` first and fall back to `~/.shell_local` if that's what you have; `shell/zshrc.sh` does the same for `local/p10k.zsh` vs `~/.p10k.zsh`; and `.githooks/pre-commit` checks `local/dotfiles_blocklist` before falling back to `~/.dotfiles_blocklist`. A gitconfig setting (`user.name`, `user.email`, anything else) works identically whether it's in `local/gitconfig` or directly in `~/.gitconfig` below the include - git doesn't care which.
 
-`install.sh` creates `local/` the first time it runs, asking first whether to set it up as its own git repo (defaulting to yes). **Answering no doesn't break anything** - every file in `local/` still works exactly the same; it just isn't versioned, diffed or backed up on its own, since there's no repo there to do that. You can turn it into one later by running `git init` in it yourself.
+`install.sh` creates `local/` the first time it runs, asking first whether to set it up as its own git repo (defaulting to yes). **Answering no doesn't break anything** - every file in `local/` still works exactly the same; it just isn't versioned, diffed or backed up on its own, since there's no repo there to do that. Either way, `local/README.md`, `local/.gitignore` and `local/.githooks/pre-commit` are created too, so it's ready to become a repo later - just run `git init` in it yourself, then `git config core.hooksPath .githooks` to turn its pre-commit hook on (or re-run `install.sh`, which does that for you).
 
 It moves an existing `~/.shell_local` and `~/.dotfiles_blocklist` into `local/` automatically (there's no real downside to that move, so it doesn't ask); for `~/.p10k.zsh` and whatever's below the include in `~/.gitconfig`, it asks first, defaulting to yes. **Answering no doesn't break anything** here either - the shell and git fallbacks above mean that file keeps working exactly as before, from its original location. The only difference is that it isn't versioned, diffed or backed up alongside everything else in `local/`.
 
@@ -140,6 +140,8 @@ Everything in `bin/` is on your `PATH`.
   - git aliases git can't run (`git ...` inside an alias, built-in names, loops), and `!` aliases with syntax errors or bash-only syntax (git runs them with `sh`, which is `dash` on Ubuntu and WSL)
 
   To allow a line on purpose, add a comment containing `alias-check: ignore`.
+
+`local/` gets its own, smaller pre-commit hook if it's a git repo (see [Local setup](#local-setup)): secrets (gitleaks) and shell syntax errors in `shell_local.sh`/`p10k.zsh`, since that folder isn't public and is only ever used from one machine - no blocklist or cross-OS checks.
 
 ## Tests
 
