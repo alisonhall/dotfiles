@@ -89,6 +89,10 @@ path_front () {
 # version nvm reports, so move nvm's folder back to the front.
 [ -n "${NVM_BIN:-}" ] && path_front "$NVM_BIN"
 
+# npm: local/npmrc if this machine has one (a custom registry, etc. - most machines won't),
+# otherwise npm's own default of ~/.npmrc
+[ -f "$DOTFILES/local/npmrc" ] && export NPM_CONFIG_USERCONFIG="$DOTFILES/local/npmrc"
+
 command -v rbenv >/dev/null 2>&1 && eval "$(rbenv init -)"
 
 # jenv and pyenv installed with git (rather than Homebrew) live in these folders

@@ -354,6 +354,9 @@ see its .gitignore.
   Included from `~/.gitconfig`, right after the shared config, so it overrides it
 - `p10k.zsh` - an optional prompt override (`p10k configure` writes one to `~/.p10k.zsh`; move or
   copy it here). Only present if you've set one up
+- `npmrc` - an optional npm/yarn config (a custom registry, etc.). Most machines won't need one;
+  `shell/common.sh` only points npm at it (via `NPM_CONFIG_USERCONFIG`) if it exists, otherwise npm
+  uses its own default of `~/.npmrc`
 - `.githooks/pre-commit` - this folder's own pre-commit hook: gitleaks and shell syntax errors,
   nothing else (no blocklist or cross-OS checks - this folder isn't public). Wired up via
   `core.hooksPath` if this folder is a git repo

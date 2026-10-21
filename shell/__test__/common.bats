@@ -60,6 +60,27 @@ with_path_add() {
 }
 
 #   -------------------------------
+#   npm
+#   -------------------------------
+
+npm_config_line() { piece '^# npm: local' '^\[ -f "\$DOTFILES'; }
+
+@test "npm: points NPM_CONFIG_USERCONFIG at local/npmrc when this machine has one" {
+	mkdir -p "$DIRS/dotfiles/local"
+	: > "$DIRS/dotfiles/local/npmrc"
+	code="$(npm_config_line)"
+	run env DOTFILES="$DIRS/dotfiles" bash -c "$code"$'\n''printf "%s\n" "$NPM_CONFIG_USERCONFIG"'
+	[ "$output" = "$DIRS/dotfiles/local/npmrc" ]
+}
+
+@test "npm: leaves NPM_CONFIG_USERCONFIG unset when this machine has no local/npmrc" {
+	mkdir -p "$DIRS/dotfiles/local"
+	code="$(npm_config_line)"
+	run env -u NPM_CONFIG_USERCONFIG DOTFILES="$DIRS/dotfiles" bash -c "$code"$'\n''printf "%s\n" "${NPM_CONFIG_USERCONFIG:-unset}"'
+	[ "$output" = "unset" ]
+}
+
+#   -------------------------------
 #   Homebrew
 #   -------------------------------
 
