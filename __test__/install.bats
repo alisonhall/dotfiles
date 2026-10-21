@@ -630,17 +630,39 @@ checksum() { cksum < "$1"; }
 	run ! grep -qxF npmrc "$LOCAL_DIR/.gitignore"
 }
 
-@test "setup_local_dir: links ~/.npmrc and ~/.m2/settings.xml, and a second run changes nothing" {
+@test "setup_local_links: links ~/.npmrc and ~/.m2/settings.xml, and a second run changes nothing" {
 	call setup_local_dir
 	printf 'registry=https://example.com/\n' > "$LOCAL_DIR/npmrc"
 	printf '<settings/>\n' > "$LOCAL_DIR/m2-settings.xml"
-	call setup_local_dir
+	call setup_local_links
 	[ "$status" -eq 0 ]
 	[ "$(readlink "$HOME/.npmrc")" = "$LOCAL_DIR/npmrc" ]
 	[ "$(readlink "$HOME/.m2/settings.xml")" = "$LOCAL_DIR/m2-settings.xml" ]
 	[ -z "$(git -C "$LOCAL_DIR" status --porcelain)" ]    # Committed in local/
-	call setup_local_dir
-	[[ "$output" != *"Linked"* ]] || false
+	call setup_local_links
+	[[ "$output" != *"Linked ~/"* ]] || false
+}
+
+@test "run_local_install: runs local/install.sh with DOTFILES set, and passes --check on" {
+	mkdir -p "$LOCAL_DIR"
+	printf '#!/usr/bin/env bash\necho "local install ran with DOTFILES=$DOTFILES args=$*"\n' > "$LOCAL_DIR/install.sh"
+	call run_local_install --check
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"local install ran with DOTFILES=$REPO args=--check"* ]] || false
+}
+
+@test "run_local_install: problems from local/install.sh are a warning, not the end of install.sh" {
+	mkdir -p "$LOCAL_DIR"
+	printf '#!/usr/bin/env bash\nexit 1\n' > "$LOCAL_DIR/install.sh"
+	call run_local_install
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"WARNING: $LOCAL_DIR/install.sh reported problems"* ]] || false
+}
+
+@test "run_local_install: does nothing without local/install.sh" {
+	mkdir -p "$LOCAL_DIR"
+	call run_local_install
+	[ -z "$output" ]
 }
 
 @test "check_local_links --check: warns when local/npmrc exists but ~/.npmrc doesn't link to it" {

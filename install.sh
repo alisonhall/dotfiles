@@ -497,12 +497,30 @@ EOF
 		echo "  Created $LOCAL_DIR/dotfiles_blocklist - add personal strings the pre-commit hook should block"
 	fi
 
+	commit_local_changes "Set up $(basename "$LOCAL_DIR")"
+}
+
+# run_local_install [--check]: Runs $LOCAL_DIR/install.sh if there is one - e.g. a private repo kept
+# in local/, which sets up its own parts (profiles, its git identity...). Runs after setup_git, so
+# ~/.gitconfig already includes $LOCAL_DIR/gitconfig. Its problems are a warning here, not the end
+# of this script.
+run_local_install() {
+	[ -f "$LOCAL_DIR/install.sh" ] || return 0
+	echo "Local setup ($LOCAL_DIR/install.sh):"
+	if ! DOTFILES="$DOTFILES" bash "$LOCAL_DIR/install.sh" "$@"; then
+		warning "$LOCAL_DIR/install.sh reported problems - see above"
+	fi
+}
+
+# setup_local_links: The links from where tools look for their config to $LOCAL_DIR (see
+# LINKED_LOCAL_FILES). After run_local_install, which may have pointed those files at a profile's copy.
+setup_local_links() {
+	echo "Linked config:"
 	local entry
 	for entry in "${LINKED_LOCAL_FILES[@]}"; do
 		link_local_file "${entry%%:*}" "${entry#*:}"
 	done
-
-	commit_local_changes "Set up $(basename "$LOCAL_DIR")"
+	commit_local_changes "Update $(basename "$LOCAL_DIR")"
 }
 
 # setup_local_hooks: Creates $LOCAL_DIR/.githooks/pre-commit - secrets (gitleaks) and shell syntax
@@ -1240,6 +1258,8 @@ main() {
 		setup_shell
 		setup_zsh_prompt
 		setup_git
+		run_local_install
+		setup_local_links
 		setup_iterm
 		setup_repo_hooks
 	fi
@@ -1247,6 +1267,7 @@ main() {
 	echo
 	check_startup_files
 	check_gitconfig
+	[ "$MODE" = check ] && run_local_install --check
 	check_new_shells
 	check_reminders
 
