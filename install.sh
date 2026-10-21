@@ -492,10 +492,14 @@ commit_local_changes() {
 	[ -d "$LOCAL_DIR/.git" ] || return 0
 	[ -n "$(git -C "$LOCAL_DIR" status --porcelain 2>/dev/null)" ] || return 0
 	git -C "$LOCAL_DIR" add -A
-	git -C "$LOCAL_DIR" \
+	# A failed commit (e.g. its pre-commit hook found a secret) leaves the changes staged rather than
+	# stopping install.sh halfway
+	if ! git -C "$LOCAL_DIR" \
 		-c user.name="$(git config --global user.name 2>/dev/null || id -un)" \
 		-c user.email="$(git config --global user.email 2>/dev/null || echo "$(id -un)@localhost")" \
-		commit -q -m "$1"
+		commit -q -m "$1"; then
+		warning "couldn't commit the changes in $LOCAL_DIR (see above) - they're staged there, ready to commit once that's fixed"
+	fi
 }
 
 #   -------------------------------

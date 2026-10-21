@@ -513,3 +513,16 @@ checksum() { cksum < "$1"; }
 	[[ "$output" == *"which doesn't exist"* ]] || false
 	[ "$(git config --global core.excludesfile)" = "$(native "$REPO/git/gitignore_global")" ]
 }
+
+@test "commit_local_changes: a commit its pre-commit hook blocks is a warning, not the end of install.sh" {
+	mkdir -p "$LOCAL_DIR/.githooks"
+	git init -q "$LOCAL_DIR"
+	printf '#!/bin/sh\necho "blocked by the hook" >&2\nexit 1\n' > "$LOCAL_DIR/.githooks/pre-commit"
+	chmod +x "$LOCAL_DIR/.githooks/pre-commit"
+	git -C "$LOCAL_DIR" config core.hooksPath .githooks
+	printf 'x\n' > "$LOCAL_DIR/file"
+	call commit_local_changes "Test"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"WARNING: couldn't commit the changes in $LOCAL_DIR"* ]] || false
+	[ -n "$(git -C "$LOCAL_DIR" diff --cached --name-only)" ]
+}
