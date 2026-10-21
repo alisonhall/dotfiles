@@ -66,6 +66,21 @@ elif command -v fnm >/dev/null 2>&1; then
 	eval "$(fnm env --use-on-cd --shell "$DOTFILES_SHELL")"
 fi
 
+# path_front <dir>: Put a folder at the start of PATH even if it's already there further along
+path_front () {
+	[ -d "$1" ] || return 0
+	local rest=":$PATH:"
+	rest="${rest//:$1:/:}"
+	rest="${rest#:}"
+	rest="${rest%:}"
+	export PATH="$1${rest:+:$rest}"
+}
+
+# nvm leaves PATH alone when its version is already active, e.g. in a terminal that inherited a PATH
+# with nvm's folder in it. Homebrew's own node (some formulae depend on it) would then win over the
+# version nvm reports, so move nvm's folder back to the front.
+[ -n "${NVM_BIN:-}" ] && path_front "$NVM_BIN"
+
 command -v rbenv >/dev/null 2>&1 && eval "$(rbenv init -)"
 
 # jenv and pyenv installed with git (rather than Homebrew) live in these folders

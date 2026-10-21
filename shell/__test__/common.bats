@@ -85,3 +85,34 @@ homebrew_setup() { piece '^if \[ -z "\${HOMEBREW_PREFIX:-}" \]; then' '^fi'; }
 	[ "${output%%:*}" = "$bin_dir" ]
 	[ "$(printf '%s\n' "$output" | tr ':' '\n' | grep -cxF "$bin_dir")" -eq 1 ]
 }
+
+#   -------------------------------
+#   path_front
+#   -------------------------------
+
+# with_path_front <PATH> <commands>: Like with_path_add, for path_front
+with_path_front() {
+	local definition
+	definition="$(piece '^path_front () {' '^}')" || return 1
+	run bash -c "$definition"$'\n''PATH="$1"; eval "$2"; printf "%s\n" "$PATH"' _ "$1" "$2"
+}
+
+@test "path_front: moves a folder that is already later in PATH to the start" {
+	with_path_front "/usr/bin:$DIRS/a:/bin" "path_front '$DIRS/a'"
+	[ "$output" = "$DIRS/a:/usr/bin:/bin" ]
+}
+
+@test "path_front: adds a folder that isn't in PATH to the start" {
+	with_path_front "/usr/bin" "path_front '$DIRS/a'"
+	[ "$output" = "$DIRS/a:/usr/bin" ]
+}
+
+@test "path_front: leaves a folder already at the start where it is, without duplicating it" {
+	with_path_front "$DIRS/a:/usr/bin" "path_front '$DIRS/a'"
+	[ "$output" = "$DIRS/a:/usr/bin" ]
+}
+
+@test "path_front: ignores a folder that doesn't exist" {
+	with_path_front "/usr/bin" "path_front '$DIRS/nope'"
+	[ "$output" = "/usr/bin" ]
+}
