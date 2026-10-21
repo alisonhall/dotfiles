@@ -15,10 +15,12 @@ if ! command -v bats >/dev/null 2>&1; then
 	exit 1
 fi
 
+# Every __test__ folder in this repo - not local/'s: that's this machine's own folder, often a
+# private repo with its own tests
 test_dirs=()
 while IFS= read -r dir; do
 	test_dirs+=("$dir")
-done < <(find . -path ./.git -prune -o -type d -name __test__ -print | sort)
+done < <(find . \( -path ./.git -o -path ./local \) -prune -o -type d -name __test__ -print | sort)
 
 if [ "${#test_dirs[@]}" -eq 0 ]; then
 	echo "No __test__ folders found."
