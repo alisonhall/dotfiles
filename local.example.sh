@@ -11,8 +11,8 @@
 # Tools that set themselves up (e.g. `conda init`) write to ~/.zshrc / ~/.bashrc instead,
 # which is fine - those files aren't in the repo either.
 #
-# Other setup scripts (e.g. for a private dotfiles repo) may add a marked block at the top of
-# this file. Leave it in place - settings below it override what it loads.
+# If local/ is your own private repo instead (cloned there before running install.sh - see the
+# README's "Local setup"), that repo provides its own shell_local.sh and this template isn't used.
 
 # Secrets (API tokens, credentials) live in secrets.sh instead, so they never need to pass
 # this folder's pre-commit hook. Sourced first, so the rest of this file can use them.
