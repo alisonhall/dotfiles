@@ -27,7 +27,9 @@ fi
 
 # Checks that pass silently: on bash 3.2 (macOS) a false [[ ]] only fails a test on its last line,
 # and `! command` never fails one. Use `[[ ... ]] || false` and `run ! command`.
-silent="$(find "${test_dirs[@]}" -name '*.bats' -exec grep -nE '^[[:space:]]*(\[\[.*\]\][[:space:]]*(#.*)?|![[:space:]].*)$' {} + || true)"
+# (`! command || false` is fine: the `|| false` is what fails the test)
+silent="$(find "${test_dirs[@]}" -name '*.bats' -exec grep -nE '^[[:space:]]*(\[\[.*\]\][[:space:]]*(#.*)?|![[:space:]].*)$' {} + |
+	grep -vE '\|\|[[:space:]]*false[[:space:]]*(#.*)?$' || true)"
 if [ -n "$silent" ]; then
 	echo "These checks can't fail a test - add '|| false' to [[ ]] checks, and use 'run !' instead of '!':" >&2
 	printf '%s\n' "$silent" | sed 's/^/  /' >&2
