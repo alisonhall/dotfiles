@@ -116,3 +116,20 @@ with_path_front() {
 	with_path_front "/usr/bin" "path_front '$DIRS/nope'"
 	[ "$output" = "/usr/bin" ]
 }
+
+@test "path_front: removes every copy of a folder, including ones listed twice in a row" {
+	with_path_front "/usr/bin:$DIRS/a:$DIRS/a:/bin:$DIRS/a" "path_front '$DIRS/a'"
+	[ "$output" = "$DIRS/a:/usr/bin:/bin" ]
+}
+
+@test "path_front: treats glob characters in a folder name literally" {
+	mkdir -p "$DIRS/weird[1]*"
+	with_path_front "/usr/bin:$DIRS/weird[1]*:/bin" "path_front '$DIRS/weird[1]*'"
+	[ "$output" = "$DIRS/weird[1]*:/usr/bin:/bin" ]
+}
+
+@test "path_front: a folder name that only contains another folder's name is left alone" {
+	mkdir -p "$DIRS/a2"
+	with_path_front "$DIRS/a2:/usr/bin" "path_front '$DIRS/a'"
+	[ "$output" = "$DIRS/a:$DIRS/a2:/usr/bin" ]
+}

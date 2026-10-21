@@ -69,10 +69,18 @@ fi
 # path_front <dir>: Put a folder at the start of PATH even if it's already there further along
 path_front () {
 	[ -d "$1" ] || return 0
-	local rest=":$PATH:"
-	rest="${rest//:$1:/:}"
-	rest="${rest#:}"
-	rest="${rest%:}"
+	# Compares each entry literally (a ${PATH//pattern/} substitution would treat glob characters in
+	# a folder name as a pattern in bash, and leave one copy of a folder that appears twice in a row)
+	local remaining="$PATH" entry rest=""
+	while [ -n "$remaining" ]; do
+		entry="${remaining%%:*}"
+		if [ "$remaining" = "$entry" ]; then
+			remaining=""
+		else
+			remaining="${remaining#*:}"
+		fi
+		[ "$entry" = "$1" ] || rest="${rest:+$rest:}$entry"
+	done
 	export PATH="$1${rest:+:$rest}"
 }
 
