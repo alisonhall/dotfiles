@@ -339,14 +339,30 @@ setup_local_dir() {
 		cat > "$LOCAL_DIR/README.md" <<'EOF'
 # Local setup
 
-Everything in this folder is specific to this machine: shell settings (shell_local.sh), git
-identity and the commit-blocklist (dotfiles_blocklist), and an optional prompt override (p10k.zsh)
-or gitconfig. None of it is tracked by the dotfiles repo itself - see its .gitignore.
+Everything in this folder is specific to this machine: shell settings, git identity, the
+commit-blocklist, an optional prompt override. None of it is tracked by the dotfiles repo itself -
+see its .gitignore.
+
+- `shell_local.sh` - this machine's shell settings (exported variables, aliases, PATH entries).
+  Loaded last by `shell/bashrc.sh`/`shell/zshrc.sh`, so it can override anything from the repo
+- `secrets.sh` - real tokens, credentials, anything else that shouldn't be committed even here.
+  Listed in `.gitignore`, so it's never staged, committed or scanned by the pre-commit hook below -
+  `shell_local.sh` sources it automatically, before everything else in that file
+- `dotfiles_blocklist` - personal strings (emails, hostnames...) the dotfiles repo's own
+  pre-commit hook should block, so they never get committed there
+- `gitconfig` - this machine's personal git settings (`user.name`, `user.email`, anything else).
+  Included from `~/.gitconfig`, right after the shared config, so it overrides it
+- `p10k.zsh` - an optional prompt override (`p10k configure` writes one to `~/.p10k.zsh`; move or
+  copy it here). Only present if you've set one up
+- `.githooks/pre-commit` - this folder's own pre-commit hook: gitleaks and shell syntax errors,
+  nothing else (no blocklist or cross-OS checks - this folder isn't public). Wired up via
+  `core.hooksPath` if this folder is a git repo
 
 If this folder has its own git repo (a .git folder here), its history, diffs and any remote you
 push it to are entirely yours to manage - install.sh never sets a remote for it. If it doesn't,
 nothing here stops working; it just isn't versioned on its own. Turn it into a repo any time by
-running `git init` in this folder.
+running `git init` in this folder (then `git config core.hooksPath .githooks` to turn the
+pre-commit hook on, or just re-run install.sh).
 
 Created by install.sh - see the "Local setup" section of the dotfiles README for details.
 EOF
