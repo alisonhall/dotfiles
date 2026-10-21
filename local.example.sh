@@ -14,6 +14,10 @@
 # Other setup scripts (e.g. for a private dotfiles repo) may add a marked block at the top of
 # this file. Leave it in place - settings below it override what it loads.
 
+# Secrets (API tokens, credentials) live in secrets.sh instead, so they never need to pass
+# this folder's pre-commit hook. Sourced first, so the rest of this file can use them.
+[ -f "$DOTFILES/local/secrets.sh" ] && source "$DOTFILES/local/secrets.sh"
+
 #   -------------------------------
 #   Values used by the shared files
 #   -------------------------------

@@ -60,13 +60,15 @@ Put anything personal, work-specific or specific to one computer in the local fi
 
 Nothing requires using it, though: `shell/bashrc.sh` and `shell/zshrc.sh` check `local/shell_local.sh` first and fall back to `~/.shell_local` if that's what you have; `shell/zshrc.sh` does the same for `local/p10k.zsh` vs `~/.p10k.zsh`; and `.githooks/pre-commit` checks `local/dotfiles_blocklist` before falling back to `~/.dotfiles_blocklist`. A gitconfig setting (`user.name`, `user.email`, anything else) works identically whether it's in `local/gitconfig` or directly in `~/.gitconfig` below the include - git doesn't care which.
 
-`install.sh` creates `local/` the first time it runs, asking first whether to set it up as its own git repo (defaulting to yes). **Answering no doesn't break anything** - every file in `local/` still works exactly the same; it just isn't versioned, diffed or backed up on its own, since there's no repo there to do that. Either way, `local/README.md`, `local/.gitignore` and `local/.githooks/pre-commit` are created too, so it's ready to become a repo later - just run `git init` in it yourself, then `git config core.hooksPath .githooks` to turn its pre-commit hook on (or re-run `install.sh`, which does that for you).
+`install.sh` creates `local/` the first time it runs, asking first whether to set it up as its own git repo (defaulting to yes). **Answering no doesn't break anything** - every file in `local/` still works exactly the same; it just isn't versioned, diffed or backed up on its own, since there's no repo there to do that. Either way, `local/README.md`, `local/.gitignore`, `local/secrets.sh` and `local/.githooks/pre-commit` are created too, so it's ready to become a repo later - just run `git init` in it yourself, then `git config core.hooksPath .githooks` to turn its pre-commit hook on (or re-run `install.sh`, which does that for you).
+
+Real secrets (API tokens, credentials) go in `local/secrets.sh`, not `local/shell_local.sh`: it's listed in `local/.gitignore`, so it's never staged, committed or scanned - `local/`'s pre-commit hook only checks it for shell syntax errors. `shell_local.sh` sources it automatically, before everything else in that file, so values set there (`ARTIFACTORY_AUTH_TOKEN`, etc.) are available to the rest of it. `install.sh` adds that sourcing line to `shell_local.sh` itself if it's missing - whether `shell_local.sh` just came from [local.example.sh](local.example.sh) (which already has it) or already existed before `secrets.sh` did.
 
 It moves an existing `~/.shell_local` and `~/.dotfiles_blocklist` into `local/` automatically (there's no real downside to that move, so it doesn't ask); for `~/.p10k.zsh` and whatever's below the include in `~/.gitconfig`, it asks first, defaulting to yes. **Answering no doesn't break anything** here either - the shell and git fallbacks above mean that file keeps working exactly as before, from its original location. The only difference is that it isn't versioned, diffed or backed up alongside everything else in `local/`.
 
 `install.sh` adds a second include for `local/gitconfig` to `~/.gitconfig`, right after the shared one (so it still overrides it), whether or not you accept moving anything into it.
 
-A remote for `local/`'s own history is entirely up to you - `install.sh` never sets one, so push/pull across your machines stays a manual step. Note that `local/gitconfig` and `local/shell_local.sh` can contain real secrets (API tokens, credentials) if you put them there; if you ever push `local/` somewhere, treat that remote with the same care as the secrets themselves, and rotate anything that leaks.
+A remote for `local/`'s own history is entirely up to you - `install.sh` never sets one, so push/pull across your machines stays a manual step. `local/secrets.sh` itself is gitignored, so it never reaches that remote either way - but `local/gitconfig` and `local/shell_local.sh` can still end up with personal details (email, server addresses) if you put them there; treat any remote you push `local/` to with the same care.
 
 ### Shell files
 
@@ -141,7 +143,7 @@ Everything in `bin/` is on your `PATH`.
 
   To allow a line on purpose, add a comment containing `alias-check: ignore`.
 
-`local/` gets its own, smaller pre-commit hook if it's a git repo (see [Local setup](#local-setup)): secrets (gitleaks) and shell syntax errors in `shell_local.sh`/`p10k.zsh`, since that folder isn't public and is only ever used from one machine - no blocklist or cross-OS checks.
+`local/` gets its own, smaller pre-commit hook if it's a git repo (see [Local setup](#local-setup)): secrets (gitleaks) and shell syntax errors in `shell_local.sh`/`secrets.sh`/`p10k.zsh`, since that folder isn't public and is only ever used from one machine - no blocklist or cross-OS checks. `secrets.sh` is gitignored, so gitleaks never actually sees it; that's where real tokens and credentials belong instead of in `shell_local.sh`.
 
 ## Tests
 

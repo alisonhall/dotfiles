@@ -294,6 +294,27 @@ active_local_file() {
 	fi
 }
 
+# Sourced from the top of shell_local.sh, so secrets are set before anything else in that file
+# might use them (e.g. NVM_AUTH_HEADER="Bearer $ARTIFACTORY_AUTH_TOKEN").
+SECRETS_SOURCE_LINE='[ -f "$DOTFILES/local/secrets.sh" ] && source "$DOTFILES/local/secrets.sh"'
+
+# ensure_secrets_sourced: Makes sure $LOCAL_DIR/shell_local.sh sources $LOCAL_DIR/secrets.sh, at
+# the top of the file, whether shell_local.sh just came from local.example.sh (which already has
+# this line) or already existed before secrets.sh did.
+ensure_secrets_sourced() {
+	local shell_local="$LOCAL_DIR/shell_local.sh"
+	[ -f "$shell_local" ] || return 0
+	grep -qxF "$SECRETS_SOURCE_LINE" "$shell_local" && return 0
+	cp "$shell_local" "$shell_local.bak.$TIMESTAMP"
+	{
+		printf '# Secrets (API tokens, credentials) live in secrets.sh instead, so they never need to pass\n'
+		printf "# this folder's pre-commit hook. Sourced first, so the rest of this file can use them.\n"
+		printf '%s\n\n' "$SECRETS_SOURCE_LINE"
+		cat "$shell_local.bak.$TIMESTAMP"
+	} > "$shell_local"
+	echo "  Added a line to $shell_local that sources $LOCAL_DIR/secrets.sh"
+}
+
 setup_local_dir() {
 	echo "Local setup:"
 	if [ ! -e "$LOCAL_DIR" ]; then
@@ -309,7 +330,10 @@ setup_local_dir() {
 	# Created either way, even if the git-repo question above was declined, so the folder is ready
 	# to become a repo later with nothing to fill in by hand.
 	if [ ! -f "$LOCAL_DIR/.gitignore" ]; then
-		printf '.DS_Store\n*.bak.*\n' > "$LOCAL_DIR/.gitignore"
+		printf '.DS_Store\n*.bak.*\nsecrets.sh\n' > "$LOCAL_DIR/.gitignore"
+	elif ! grep -qxF secrets.sh "$LOCAL_DIR/.gitignore"; then
+		printf 'secrets.sh\n' >> "$LOCAL_DIR/.gitignore"
+		echo "  Added secrets.sh to $LOCAL_DIR/.gitignore"
 	fi
 	if [ ! -f "$LOCAL_DIR/README.md" ]; then
 		cat > "$LOCAL_DIR/README.md" <<'EOF'
@@ -328,6 +352,17 @@ Created by install.sh - see the "Local setup" section of the dotfiles README for
 EOF
 	fi
 
+	if [ ! -f "$LOCAL_DIR/secrets.sh" ]; then
+		cat > "$LOCAL_DIR/secrets.sh" <<'EOF'
+# This machine's secrets - API tokens, credentials, anything else that shouldn't be committed even
+# here. Gitignored (see .gitignore), so it's never scanned or blocked by this folder's pre-commit
+# hook. shell_local.sh sources it automatically, before everything else in that file.
+
+# export ARTIFACTORY_AUTH_TOKEN="..."
+EOF
+		echo "  Created $LOCAL_DIR/secrets.sh - put real tokens and credentials here instead of in shell_local.sh"
+	fi
+
 	setup_local_hooks
 
 	migrate_into_local "$HOME/.shell_local" "$LOCAL_DIR/shell_local.sh"
@@ -338,6 +373,8 @@ EOF
 		cp "$DOTFILES/local.example.sh" "$LOCAL_DIR/shell_local.sh"
 		echo "  Created $LOCAL_DIR/shell_local.sh from local.example.sh - fill it in for this machine"
 	fi
+	ensure_secrets_sourced
+
 	if [ ! -f "$LOCAL_DIR/dotfiles_blocklist" ]; then
 		cat > "$LOCAL_DIR/dotfiles_blocklist" <<'EOF'
 # Strings that must never be committed to the public dotfiles repo.
@@ -387,8 +424,8 @@ else
 fi
 
 # 2. Shell syntax, so a broken file is never committed
-bash_files=(shell_local.sh)
-zsh_files=(shell_local.sh p10k.zsh)
+bash_files=(shell_local.sh secrets.sh)
+zsh_files=(shell_local.sh secrets.sh p10k.zsh)
 for file in "${bash_files[@]}"; do
 	[ -f "$file" ] || continue
 	if ! output="$(bash -n "$file" 2>&1)"; then

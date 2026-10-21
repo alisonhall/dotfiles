@@ -178,11 +178,45 @@ checksum() { cksum < "$1"; }
 	[ -f "$LOCAL_DIR/dotfiles_blocklist" ]
 	[ -f "$LOCAL_DIR/.gitignore" ]
 	[ -f "$LOCAL_DIR/README.md" ]
+	[ -f "$LOCAL_DIR/secrets.sh" ]
+	grep -qxF secrets.sh "$LOCAL_DIR/.gitignore"
+	grep -qF 'source "$DOTFILES/local/secrets.sh"' "$LOCAL_DIR/shell_local.sh"
 	[ -x "$LOCAL_DIR/.githooks/pre-commit" ]
 	[ "$(git -C "$LOCAL_DIR" config --get core.hooksPath)" = .githooks ]
 	# Committed, not left sitting staged/untracked
 	[ -z "$(git -C "$LOCAL_DIR" status --porcelain)" ]
 	[ "$(git -C "$LOCAL_DIR" log --oneline | wc -l | tr -d ' ')" -eq 1 ]
+}
+
+@test "setup_local_dir: adds secrets.sh to an existing .gitignore that predates it" {
+	call setup_local_dir
+	sed -i.orig '/secrets.sh/d' "$LOCAL_DIR/.gitignore" && rm -f "$LOCAL_DIR/.gitignore.orig"
+	! grep -qxF secrets.sh "$LOCAL_DIR/.gitignore" || false
+	call setup_local_dir
+	[ "$status" -eq 0 ]
+	grep -qxF secrets.sh "$LOCAL_DIR/.gitignore"
+}
+
+@test "setup_local_dir: adds the secrets.sh sourcing line to a shell_local.sh that predates it" {
+	mkdir -p "$LOCAL_DIR"
+	printf 'export NAME=Me\n' > "$LOCAL_DIR/shell_local.sh"
+	call setup_local_dir
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"sources $LOCAL_DIR/secrets.sh"* ]] || false
+	grep -qF 'source "$DOTFILES/local/secrets.sh"' "$LOCAL_DIR/shell_local.sh"
+	grep -qxF 'export NAME=Me' "$LOCAL_DIR/shell_local.sh"
+	# secrets.sh source line comes before the pre-existing content
+	[ "$(grep -nF 'source "$DOTFILES/local/secrets.sh"' "$LOCAL_DIR/shell_local.sh" | cut -d: -f1)" -lt \
+		"$(grep -nxF 'export NAME=Me' "$LOCAL_DIR/shell_local.sh" | cut -d: -f1)" ]
+}
+
+@test "setup_local_dir: a second run doesn't duplicate the secrets.sh sourcing line" {
+	call setup_local_dir
+	before="$(grep -cF 'source "$DOTFILES/local/secrets.sh"' "$LOCAL_DIR/shell_local.sh")"
+	call setup_local_dir
+	after="$(grep -cF 'source "$DOTFILES/local/secrets.sh"' "$LOCAL_DIR/shell_local.sh")"
+	[ "$before" -eq 1 ]
+	[ "$after" -eq 1 ]
 }
 
 @test "setup_local_dir: asks before creating LOCAL_DIR as a git repo, and a declined answer leaves it a plain folder" {
@@ -236,7 +270,9 @@ checksum() { cksum < "$1"; }
 	printf 'blocked-string\n' > "$HOME/.dotfiles_blocklist"
 	call setup_local_dir
 	[ "$status" -eq 0 ]
-	[ "$(cat "$LOCAL_DIR/shell_local.sh")" = "export NAME=Me" ]
+	# Moved content is kept, with the secrets.sh sourcing line added ahead of it
+	grep -qxF 'export NAME=Me' "$LOCAL_DIR/shell_local.sh"
+	grep -qF 'source "$DOTFILES/local/secrets.sh"' "$LOCAL_DIR/shell_local.sh"
 	[ "$(cat "$LOCAL_DIR/p10k.zsh")" = "existing p10k config" ]
 	[ "$(cat "$LOCAL_DIR/dotfiles_blocklist")" = "blocked-string" ]
 	[ ! -e "$HOME/.shell_local" ]
@@ -258,7 +294,9 @@ checksum() { cksum < "$1"; }
 	printf 'export NAME=Already-here\n' > "$LOCAL_DIR/shell_local.sh"
 	printf 'export NAME=Me\n' > "$HOME/.shell_local"
 	call setup_local_dir
-	[ "$(cat "$LOCAL_DIR/shell_local.sh")" = "export NAME=Already-here" ]
+	# Existing content is kept, with the secrets.sh sourcing line added ahead of it
+	grep -qxF 'export NAME=Already-here' "$LOCAL_DIR/shell_local.sh"
+	! grep -qxF 'export NAME=Me' "$LOCAL_DIR/shell_local.sh" || false
 	# The old ~/.shell_local is left alone - migrate_into_local only moves into an empty slot
 	[ -f "$HOME/.shell_local" ]
 }
