@@ -129,3 +129,13 @@ load fixture
 	check portability
 	[ "$status" -eq 0 ]
 }
+
+@test "keeps checking a file after a byte that isn't valid UTF-8" {
+	mkdir -p "$FIX/shell/common"
+	printf 'echo "\xe2\x96 a broken character"\ncd $HOME/after-it\n' > "$FIX/shell/common/a.sh"
+	git -C "$FIX" add shell/common/a.sh
+	check portability
+	[ "$status" -ne 0 ]
+	[[ "$output" == *"shell/common/a.sh:2:"* ]] || false
+	[[ "$output" != *"towc"* ]] || false
+}

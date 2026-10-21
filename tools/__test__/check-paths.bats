@@ -54,3 +54,10 @@ windows_users="C:/Users"
 	check paths
 	[ "$status" -eq 0 ]
 }
+
+@test "keeps checking a file after a byte that isn't valid UTF-8 (the repo-location check uses awk)" {
+	add shell/a.sh "$(printf 'echo "\xe2\x96 a broken character"')" "source \"$FIX/shell/extra.sh\""
+	check paths
+	[ "$status" -ne 0 ]
+	[[ "$output" == *"This repo's location is hard-coded"*"shell/a.sh:2:"* ]] || false
+}

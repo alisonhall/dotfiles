@@ -28,6 +28,10 @@
 # Prints each problem and exits non-zero if there are any.
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
+
+# Treat files as bytes - macOS awk stops reading a file at a byte that isn't valid in the current
+# locale (e.g. a stray non-UTF-8 character), so anything after it would go unchecked
+export LC_ALL=C
 failed=0
 
 # Kept as their authors wrote them
