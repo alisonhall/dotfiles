@@ -93,6 +93,9 @@ path_front () {
 # otherwise npm's own default of ~/.npmrc
 [ -f "$DOTFILES/local/npmrc" ] && export NPM_CONFIG_USERCONFIG="$DOTFILES/local/npmrc"
 
+# Maven: same idea as npm above, via MAVEN_ARGS (Maven 3.9.1+) instead of ~/.m2/settings.xml
+[ -f "$DOTFILES/local/m2-settings.xml" ] && export MAVEN_ARGS="--settings $DOTFILES/local/m2-settings.xml"
+
 command -v rbenv >/dev/null 2>&1 && eval "$(rbenv init -)"
 
 # jenv and pyenv installed with git (rather than Homebrew) live in these folders

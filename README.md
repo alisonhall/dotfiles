@@ -49,6 +49,7 @@ The installer doesn't replace your existing config files. It:
 | Git | `git/gitconfig`, `git/gitignore_global`, `git/` tools (see below) | `local/gitconfig`, or directly in `~/.gitconfig` (below the include) |
 | Prompt (zsh) | `config/p10k.zsh` | `local/p10k.zsh` or `~/.p10k.zsh` - whichever exists is used instead |
 | npm/yarn | | `local/npmrc`, if this machine needs a custom registry - most don't |
+| Maven | | `local/m2-settings.xml`, if this machine needs one - most don't |
 | iTerm (macOS) | `config/iterm/` | |
 | VS Code | `config/vscode/` (not applied automatically - see below) | |
 | Scripts | `bin/` (added to `PATH`) | |
@@ -61,7 +62,7 @@ Put anything personal, work-specific or specific to one computer in the local fi
 
 Nothing requires using it, though: `shell/bashrc.sh` and `shell/zshrc.sh` check `local/shell_local.sh` first and fall back to `~/.shell_local` if that's what you have; `shell/zshrc.sh` does the same for `local/p10k.zsh` vs `~/.p10k.zsh`; and `.githooks/pre-commit` checks `local/dotfiles_blocklist` before falling back to `~/.dotfiles_blocklist`. A gitconfig setting (`user.name`, `user.email`, anything else) works identically whether it's in `local/gitconfig` or directly in `~/.gitconfig` below the include - git doesn't care which.
 
-`local/npmrc` works the same way, but in the other direction: most machines don't need a custom npm/yarn registry at all, so `install.sh` never creates one. `shell/common.sh` only points npm at `local/npmrc` (via `NPM_CONFIG_USERCONFIG`) if that file happens to exist; otherwise npm uses its own default of `~/.npmrc`, same as if this repo didn't exist.
+`local/npmrc` and `local/m2-settings.xml` work the same way, but in the other direction: most machines don't need a custom npm/yarn registry or Maven settings at all, so `install.sh` never creates either. `shell/common.sh` only points npm at `local/npmrc` (via `NPM_CONFIG_USERCONFIG`) or Maven at `local/m2-settings.xml` (via `MAVEN_ARGS`, Maven 3.9.1+) if that file happens to exist; otherwise each tool uses its own default (`~/.npmrc`, `~/.m2/settings.xml`), same as if this repo didn't exist.
 
 `install.sh` creates `local/` the first time it runs, asking first whether to set it up as its own git repo (defaulting to yes). **Answering no doesn't break anything** - every file in `local/` still works exactly the same; it just isn't versioned, diffed or backed up on its own, since there's no repo there to do that. Either way, `local/README.md`, `local/.gitignore`, `local/secrets.sh` and `local/.githooks/pre-commit` are created too, so it's ready to become a repo later - just run `git init` in it yourself, then `git config core.hooksPath .githooks` to turn its pre-commit hook on (or re-run `install.sh`, which does that for you).
 

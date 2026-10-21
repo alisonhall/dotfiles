@@ -357,6 +357,9 @@ see its .gitignore.
 - `npmrc` - an optional npm/yarn config (a custom registry, etc.). Most machines won't need one;
   `shell/common.sh` only points npm at it (via `NPM_CONFIG_USERCONFIG`) if it exists, otherwise npm
   uses its own default of `~/.npmrc`
+- `m2-settings.xml` - an optional Maven settings file, same idea as `npmrc`: `shell/common.sh`
+  only points Maven at it (via `MAVEN_ARGS`, Maven 3.9.1+) if it exists, otherwise Maven uses its
+  own default of `~/.m2/settings.xml`
 - `.githooks/pre-commit` - this folder's own pre-commit hook: gitleaks and shell syntax errors,
   nothing else (no blocklist or cross-OS checks - this folder isn't public). Wired up via
   `core.hooksPath` if this folder is a git repo

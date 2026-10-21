@@ -81,6 +81,27 @@ npm_config_line() { piece '^# npm: local' '^\[ -f "\$DOTFILES'; }
 }
 
 #   -------------------------------
+#   Maven
+#   -------------------------------
+
+maven_args_line() { piece '^# Maven: same idea' '^\[ -f "\$DOTFILES'; }
+
+@test "Maven: points MAVEN_ARGS at local/m2-settings.xml when this machine has one" {
+	mkdir -p "$DIRS/dotfiles/local"
+	: > "$DIRS/dotfiles/local/m2-settings.xml"
+	code="$(maven_args_line)"
+	run env DOTFILES="$DIRS/dotfiles" bash -c "$code"$'\n''printf "%s\n" "$MAVEN_ARGS"'
+	[ "$output" = "--settings $DIRS/dotfiles/local/m2-settings.xml" ]
+}
+
+@test "Maven: leaves MAVEN_ARGS unset when this machine has no local/m2-settings.xml" {
+	mkdir -p "$DIRS/dotfiles/local"
+	code="$(maven_args_line)"
+	run env -u MAVEN_ARGS DOTFILES="$DIRS/dotfiles" bash -c "$code"$'\n''printf "%s\n" "${MAVEN_ARGS:-unset}"'
+	[ "$output" = "unset" ]
+}
+
+#   -------------------------------
 #   Homebrew
 #   -------------------------------
 
