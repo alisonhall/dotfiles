@@ -294,6 +294,97 @@ active_local_file() {
 	fi
 }
 
+# Tool config files that live in $LOCAL_DIR, linked from where the tool looks for them
+# (<name in $LOCAL_DIR>:<path under $HOME>). A link works for everything - the terminal, scripts,
+# IDEs - unlike an environment variable or a shell function, which only reach programs started from
+# a terminal. Only set up when the file exists; most machines need neither.
+LINKED_LOCAL_FILES=(
+	"npmrc:.npmrc"
+	"m2-settings.xml:.m2/settings.xml"
+)
+
+# looks_like_credentials <file>: Whether a config file seems to hold a password or token
+# (npm's _authToken/_auth/_password, Maven's <password>/<privateKey>/<passphrase>)
+looks_like_credentials() {
+	grep -qiE '(_authToken|_auth|_password)[[:space:]]*=|<(password|privateKey|passphrase)>' "$1"
+}
+
+# gitignore_if_credentials <name in $LOCAL_DIR>: Keeps a file with credentials out of $LOCAL_DIR's
+# history, like secrets.sh. It's still linked and used - just never committed (or blocked by
+# $LOCAL_DIR's gitleaks check).
+gitignore_if_credentials() {
+	local name="$1"
+	[ -f "$LOCAL_DIR/$name" ] && looks_like_credentials "$LOCAL_DIR/$name" || return 0
+	grep -qxF "$name" "$LOCAL_DIR/.gitignore" 2>/dev/null && return 0
+	printf '%s\n' "$name" >> "$LOCAL_DIR/.gitignore"
+	[ -d "$LOCAL_DIR/.git" ] && git -C "$LOCAL_DIR" rm -q --cached --ignore-unmatch -- "$name"
+	echo "  $LOCAL_DIR/$name looks like it holds passwords or tokens, so it's in $LOCAL_DIR/.gitignore - still used, just never committed"
+}
+
+is_windows() { case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) return 0 ;; *) return 1 ;; esac; }
+
+# make_link <target> <link>: A symlink. In Git Bash, a real Windows one (which needs Developer Mode
+# or admin rights) rather than ln's default of quietly making a copy that would go out of date.
+make_link() {
+	mkdir -p "$(dirname "$2")"
+	if is_windows; then
+		MSYS=winsymlinks:nativestrict ln -s "$1" "$2" 2>/dev/null
+	else
+		ln -s "$1" "$2"
+	fi
+}
+
+# link_local_file <name in $LOCAL_DIR> <path under $HOME>: Points ~/<path> at $LOCAL_DIR/<name>.
+#   - only ~/<path> exists: asks to move it into $LOCAL_DIR and link it back (defaulting to yes)
+#   - only $LOCAL_DIR/<name> exists: links to it
+#   - both, identical: replaces ~/<path> with the link (after a backup)
+#   - both, different: warns and leaves both - ~/<path> is the one the tool uses
+#   - ~/<path> links somewhere else: leaves it, unless that's a broken link (e.g. the repo moved)
+link_local_file() {
+	local local_file="$LOCAL_DIR/$1" home_file="$HOME/$2"
+	if [ -L "$home_file" ]; then
+		[ "$(readlink "$home_file")" = "$local_file" ] && return 0
+		if [ -e "$home_file" ] || [ ! -f "$local_file" ]; then
+			note "~/$2 links to $(readlink "$home_file"), not $local_file - leaving it as it is"
+			return 0
+		fi
+		rm "$home_file"    # A broken link, e.g. to where this repo used to be
+	elif [ -f "$home_file" ]; then
+		if [ ! -f "$local_file" ]; then
+			if ! ask_yes_no "  Move ~/$2 into $local_file and link it back, so it's versioned with everything else there?" y; then
+				echo "  Leaving ~/$2 where it is - still used from there, just not versioned with $LOCAL_DIR"
+				return 0
+			fi
+			mv "$home_file" "$local_file"
+			echo "  Moved ~/$2 to $local_file"
+		elif cmp -s "$home_file" "$local_file"; then
+			mv "$home_file" "$home_file.bak.$TIMESTAMP"
+		else
+			warning "~/$2 and $local_file are different files. ~/$2 is the one in use - merge what you need into $local_file, delete ~/$2, and re-run install.sh to link it"
+			return 0
+		fi
+	fi
+	[ -f "$local_file" ] || return 0
+	gitignore_if_credentials "$1"
+	if make_link "$local_file" "$home_file"; then
+		echo "  Linked ~/$2 to $local_file"
+	else
+		note "couldn't link ~/$2 to $local_file. On Windows, turn on Developer Mode (Settings > System > For developers) and re-run install.sh, or copy the file there yourself and keep the copies in step"
+	fi
+}
+
+# The same, for --check: whether each linked file is set up
+check_local_links() {
+	local entry name path
+	for entry in "${LINKED_LOCAL_FILES[@]}"; do
+		name="${entry%%:*}" path="${entry#*:}"
+		[ -f "$LOCAL_DIR/$name" ] || continue
+		if [ "$(readlink "$HOME/$path" 2>/dev/null || true)" != "$LOCAL_DIR/$name" ]; then
+			warning "~/$path doesn't link to $LOCAL_DIR/$name, so tools use $([ -e "$HOME/$path" ] && echo "~/$path instead" || echo "their defaults") - run ./install.sh"
+		fi
+	done
+}
+
 # Sourced from the top of shell_local.sh, so secrets are set before anything else in that file
 # might use them (e.g. NVM_AUTH_HEADER="Bearer $ARTIFACTORY_AUTH_TOKEN").
 SECRETS_SOURCE_LINE='[ -f "$DOTFILES/local/secrets.sh" ] && source "$DOTFILES/local/secrets.sh"'
@@ -354,12 +445,11 @@ see its .gitignore.
   Included from `~/.gitconfig`, right after the shared config, so it overrides it
 - `p10k.zsh` - an optional prompt override (`p10k configure` writes one to `~/.p10k.zsh`; move or
   copy it here). Only present if you've set one up
-- `npmrc` - an optional npm/yarn config (a custom registry, etc.). Most machines won't need one;
-  `shell/common.sh` only points npm at it (via `NPM_CONFIG_USERCONFIG`) if it exists, otherwise npm
-  uses its own default of `~/.npmrc`
-- `m2-settings.xml` - an optional Maven settings file, same idea as `npmrc`: `shell/common.sh`
-  wraps `mvn` to pass it with `--settings` if it exists, otherwise Maven uses its own default of
-  `~/.m2/settings.xml`. Only for `mvn` typed in a terminal, not scripts or IDEs
+- `npmrc` - an optional npm/yarn config (a custom registry, etc.), linked from `~/.npmrc`. Most
+  machines won't need one
+- `m2-settings.xml` - an optional Maven settings file, linked from `~/.m2/settings.xml`. Most
+  machines won't need one either. Both links work everywhere - the terminal, scripts and IDEs. If
+  either file holds passwords or tokens, install.sh adds it to `.gitignore`, like `secrets.sh`
 - `.githooks/pre-commit` - this folder's own pre-commit hook: gitleaks and shell syntax errors,
   nothing else (no blocklist or cross-OS checks - this folder isn't public). Wired up via
   `core.hooksPath` if this folder is a git repo
@@ -406,6 +496,11 @@ EOF
 EOF
 		echo "  Created $LOCAL_DIR/dotfiles_blocklist - add personal strings the pre-commit hook should block"
 	fi
+
+	local entry
+	for entry in "${LINKED_LOCAL_FILES[@]}"; do
+		link_local_file "${entry%%:*}" "${entry#*:}"
+	done
 
 	commit_local_changes "Set up $(basename "$LOCAL_DIR")"
 }
@@ -1075,6 +1170,10 @@ check_reminders() {
 			reminders_shown=1
 		fi
 	fi
+
+	local warnings_before=$WARNINGS
+	check_local_links
+	[ "$WARNINGS" -gt "$warnings_before" ] && reminders_shown=1
 
 	if [ "$reminders_shown" = 0 ]; then
 		ok "nothing to follow up"

@@ -514,6 +514,145 @@ checksum() { cksum < "$1"; }
 	[ "$(git config --global core.excludesfile)" = "$(native "$REPO/git/gitignore_global")" ]
 }
 
+#   -------------------------------
+#   Linked tool config (~/.npmrc, ~/.m2/settings.xml -> local/)
+#   -------------------------------
+
+@test "link_local_file: links ~/.npmrc to local/npmrc when only the local copy exists" {
+	mkdir -p "$LOCAL_DIR"
+	printf 'registry=https://example.com/\n' > "$LOCAL_DIR/npmrc"
+	call link_local_file npmrc .npmrc
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"Linked ~/.npmrc to $LOCAL_DIR/npmrc"* ]] || false
+	[ "$(readlink "$HOME/.npmrc")" = "$LOCAL_DIR/npmrc" ]
+	[ "$(cat "$HOME/.npmrc")" = "registry=https://example.com/" ]
+}
+
+@test "link_local_file: creates ~/.m2 for Maven's settings.xml" {
+	mkdir -p "$LOCAL_DIR"
+	printf '<settings/>\n' > "$LOCAL_DIR/m2-settings.xml"
+	call link_local_file m2-settings.xml .m2/settings.xml
+	[ "$(readlink "$HOME/.m2/settings.xml")" = "$LOCAL_DIR/m2-settings.xml" ]
+}
+
+@test "link_local_file: asks to move an existing ~/.npmrc into local/, then links it back" {
+	mkdir -p "$LOCAL_DIR"
+	printf 'registry=https://example.com/\n' > "$HOME/.npmrc"
+	call_answering y link_local_file npmrc .npmrc
+	[[ "$output" == *"Move ~/.npmrc into $LOCAL_DIR/npmrc"* ]] || false
+	[ "$(cat "$LOCAL_DIR/npmrc")" = "registry=https://example.com/" ]
+	[ "$(readlink "$HOME/.npmrc")" = "$LOCAL_DIR/npmrc" ]
+}
+
+@test "link_local_file: a declined move leaves ~/.npmrc where it is" {
+	mkdir -p "$LOCAL_DIR"
+	printf 'registry=https://example.com/\n' > "$HOME/.npmrc"
+	call_answering n link_local_file npmrc .npmrc
+	[[ "$output" == *"Leaving ~/.npmrc where it is"* ]] || false
+	[ ! -L "$HOME/.npmrc" ]
+	[ ! -e "$LOCAL_DIR/npmrc" ]
+}
+
+@test "link_local_file: an identical ~/.npmrc is backed up and replaced with the link" {
+	mkdir -p "$LOCAL_DIR"
+	printf 'same\n' > "$LOCAL_DIR/npmrc"
+	printf 'same\n' > "$HOME/.npmrc"
+	call link_local_file npmrc .npmrc
+	[ "$(readlink "$HOME/.npmrc")" = "$LOCAL_DIR/npmrc" ]
+	ls "$HOME"/.npmrc.bak.*
+}
+
+@test "link_local_file: a different ~/.npmrc gets a warning, and both files are left alone" {
+	mkdir -p "$LOCAL_DIR"
+	printf 'local\n' > "$LOCAL_DIR/npmrc"
+	printf 'home\n' > "$HOME/.npmrc"
+	call link_local_file npmrc .npmrc
+	[[ "$output" == *"WARNING: ~/.npmrc and $LOCAL_DIR/npmrc are different files"* ]] || false
+	[ ! -L "$HOME/.npmrc" ]
+	[ "$(cat "$HOME/.npmrc")" = home ]
+	[ "$(cat "$LOCAL_DIR/npmrc")" = local ]
+}
+
+@test "link_local_file: leaves a ~/.npmrc that links somewhere else on purpose" {
+	mkdir -p "$LOCAL_DIR"
+	printf 'local\n' > "$LOCAL_DIR/npmrc"
+	printf 'elsewhere\n' > "$BATS_TEST_TMPDIR/other-npmrc"
+	ln -s "$BATS_TEST_TMPDIR/other-npmrc" "$HOME/.npmrc"
+	call link_local_file npmrc .npmrc
+	[[ "$output" == *"~/.npmrc links to $BATS_TEST_TMPDIR/other-npmrc"*"leaving it as it is"* ]] || false
+	[ "$(readlink "$HOME/.npmrc")" = "$BATS_TEST_TMPDIR/other-npmrc" ]
+}
+
+@test "link_local_file: re-points a broken link (e.g. after the repo moved)" {
+	mkdir -p "$LOCAL_DIR"
+	printf 'local\n' > "$LOCAL_DIR/npmrc"
+	ln -s "$BATS_TEST_TMPDIR/old-repo/local/npmrc" "$HOME/.npmrc"
+	call link_local_file npmrc .npmrc
+	[ "$(readlink "$HOME/.npmrc")" = "$LOCAL_DIR/npmrc" ]
+}
+
+@test "link_local_file: does nothing when neither exists, or when it's already linked" {
+	mkdir -p "$LOCAL_DIR"
+	call link_local_file npmrc .npmrc
+	[ -z "$output" ]
+	[ ! -e "$HOME/.npmrc" ]
+	printf 'local\n' > "$LOCAL_DIR/npmrc"
+	call link_local_file npmrc .npmrc
+	call link_local_file npmrc .npmrc
+	[ -z "$output" ]
+}
+
+@test "link_local_file: a file with a token or password is gitignored in local/, but still linked" {
+	mkdir -p "$LOCAL_DIR"
+	git init -q "$LOCAL_DIR"
+	printf '.DS_Store\n' > "$LOCAL_DIR/.gitignore"
+	printf '//registry.example.com/:_authToken=abc123\n' > "$LOCAL_DIR/npmrc"
+	git -C "$LOCAL_DIR" add npmrc
+	call link_local_file npmrc .npmrc
+	[[ "$output" == *"looks like it holds passwords or tokens"* ]] || false
+	grep -qxF npmrc "$LOCAL_DIR/.gitignore"
+	[ "$(readlink "$HOME/.npmrc")" = "$LOCAL_DIR/npmrc" ]
+	# No longer staged, so it can't be committed
+	[ -z "$(git -C "$LOCAL_DIR" diff --cached --name-only)" ]
+}
+
+@test "link_local_file: Maven settings with a <password> are gitignored too" {
+	mkdir -p "$LOCAL_DIR"
+	printf '<settings><servers><server><password>x</password></server></servers></settings>\n' > "$LOCAL_DIR/m2-settings.xml"
+	call link_local_file m2-settings.xml .m2/settings.xml
+	grep -qxF m2-settings.xml "$LOCAL_DIR/.gitignore"
+}
+
+@test "link_local_file: a file without credentials isn't gitignored" {
+	mkdir -p "$LOCAL_DIR"
+	printf 'registry=https://example.com/\n' > "$LOCAL_DIR/npmrc"
+	call link_local_file npmrc .npmrc
+	run ! grep -qxF npmrc "$LOCAL_DIR/.gitignore"
+}
+
+@test "setup_local_dir: links ~/.npmrc and ~/.m2/settings.xml, and a second run changes nothing" {
+	call setup_local_dir
+	printf 'registry=https://example.com/\n' > "$LOCAL_DIR/npmrc"
+	printf '<settings/>\n' > "$LOCAL_DIR/m2-settings.xml"
+	call setup_local_dir
+	[ "$status" -eq 0 ]
+	[ "$(readlink "$HOME/.npmrc")" = "$LOCAL_DIR/npmrc" ]
+	[ "$(readlink "$HOME/.m2/settings.xml")" = "$LOCAL_DIR/m2-settings.xml" ]
+	[ -z "$(git -C "$LOCAL_DIR" status --porcelain)" ]    # Committed in local/
+	call setup_local_dir
+	[[ "$output" != *"Linked"* ]] || false
+}
+
+@test "check_local_links --check: warns when local/npmrc exists but ~/.npmrc doesn't link to it" {
+	mkdir -p "$LOCAL_DIR"
+	printf 'local\n' > "$LOCAL_DIR/npmrc"
+	MODE_FLAG=--check call check_local_links
+	[[ "$output" == *"WARNING: ~/.npmrc doesn't link to $LOCAL_DIR/npmrc, so tools use their defaults"* ]] || false
+	printf 'home\n' > "$HOME/.npmrc"
+	MODE_FLAG=--check call check_local_links
+	[[ "$output" == *"so tools use ~/.npmrc instead"* ]] || false
+}
+
 @test "commit_local_changes: a commit its pre-commit hook blocks is a warning, not the end of install.sh" {
 	mkdir -p "$LOCAL_DIR/.githooks"
 	git init -q "$LOCAL_DIR"
