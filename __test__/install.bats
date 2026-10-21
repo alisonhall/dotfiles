@@ -769,3 +769,23 @@ private_repo_local() {
 	run env SKIP_GITLEAKS=1 bash -c 'cd "$1" && ./.githooks/pre-commit' bats-call "$LOCAL_DIR"
 	[ "$status" -eq 0 ]
 }
+
+@test "check_gitconfig --check: warns when ~/.gitconfig overrides a setting in local/gitconfig" {
+	mkdir -p "$LOCAL_DIR"
+	printf '[user]\n\temail = me@example.com\n\tname = Me\n' > "$LOCAL_DIR/gitconfig"
+	printf '[include]\n\tpath = %s\n\tpath = %s\n[user]\n\temail = old@example.com\n\tname = Me\n' \
+		"$SHARED_INCLUDE" "$LOCAL_DIR/gitconfig" > "$HOME/.gitconfig"
+	MODE_FLAG=--check call check_gitconfig
+	[[ "$output" == *"WARNING: $HOME/.gitconfig also sets user.email, with different values from $LOCAL_DIR/gitconfig"* ]] || false
+	[[ "$output" != *"user.name"* ]] || false    # Same value in both, so it doesn't matter
+}
+
+@test "check_gitconfig --check: no local/gitconfig warning when they agree, or when there's no local/gitconfig" {
+	printf '[include]\n\tpath = %s\n[user]\n\temail = me@example.com\n' "$SHARED_INCLUDE" > "$HOME/.gitconfig"
+	MODE_FLAG=--check call check_gitconfig
+	[[ "$output" != *"also sets"* ]] || false
+	mkdir -p "$LOCAL_DIR"
+	printf '[user]\n\temail = me@example.com\n' > "$LOCAL_DIR/gitconfig"
+	MODE_FLAG=--check call check_gitconfig
+	[[ "$output" != *"also sets"* ]] || false
+}

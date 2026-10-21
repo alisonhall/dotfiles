@@ -1178,13 +1178,7 @@ check_gitconfig() {
 	fi
 	# Settings both files have, minus the ones with identical values (harmless - e.g. `git lfs install` adds
 	# the same [filter "lfs"] settings the shared config has)
-	overlap="$(comm -23 \
-		<(comm -12 \
-			<(git config --file "$gitconfig" --name-only --list | sort -u) \
-			<(git config --file "$DOTFILES/git/gitconfig" --name-only --list | sort -u)) \
-		<(comm -12 \
-			<(git config --file "$gitconfig" --list | sort -u) \
-			<(git config --file "$DOTFILES/git/gitconfig" --list | sort -u) | cut -d= -f1 | sort -u))"
+	overlap="$(differing_settings "$gitconfig" "$DOTFILES/git/gitconfig")"
 	if [ -n "$overlap" ]; then
 		count="$(printf '%s\n' "$overlap" | wc -l | tr -d ' ')"
 		warning "$gitconfig overrides $count setting(s) from the shared git config with different values:"
@@ -1193,6 +1187,29 @@ check_gitconfig() {
 	else
 		ok "$gitconfig doesn't override the shared config"
 	fi
+
+	# The same for $LOCAL_DIR/gitconfig: ~/.gitconfig includes it near the top, so anything set again
+	# below that wins - e.g. a [user] section left behind after moving to local/
+	local local_gitconfig="$LOCAL_DIR/gitconfig"
+	if [ -s "$local_gitconfig" ]; then
+		overlap="$(differing_settings "$gitconfig" "$local_gitconfig")"
+		if [ -n "$overlap" ]; then
+			warning "$gitconfig also sets $(printf '%s\n' "$overlap" | paste -sd ' ' -), with different values from $local_gitconfig - and $gitconfig's win."
+			detail "Keep each setting in one place: delete it from $gitconfig if $local_gitconfig has the one you want."
+		fi
+	fi
+}
+
+# differing_settings <gitconfig> <other gitconfig>: The settings both files set, with different values
+# (include.path aside - several includes are normal)
+differing_settings() {
+	comm -23 \
+		<(comm -12 \
+			<(git config --file "$1" --name-only --list 2>/dev/null | grep -vx include.path | sort -u) \
+			<(git config --file "$2" --name-only --list 2>/dev/null | grep -vx include.path | sort -u)) \
+		<(comm -12 \
+			<(git config --file "$1" --list 2>/dev/null | sort -u) \
+			<(git config --file "$2" --list 2>/dev/null | sort -u) | cut -d= -f1 | sort -u)
 }
 
 check_reminders() {
