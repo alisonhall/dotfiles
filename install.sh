@@ -265,6 +265,12 @@ ask_yes_no() {
 	done
 }
 
+# The files in $LOCAL_DIR this run of install.sh has created or changed (relative to it), so
+# commit_local_changes commits those and nothing else - e.g. not your own half-finished edits, when
+# local/ is a private repo you work in
+LOCAL_CHANGED=()
+local_changed() { LOCAL_CHANGED+=("${1#"$LOCAL_DIR"/}"); }
+
 # migrate_into_local <old file outside the repo> <new file in $LOCAL_DIR> [--confirm]: Moves a
 # per-machine file into $LOCAL_DIR the first time (does nothing once it's already there, or if
 # there's nothing to move). With --confirm, asks first (defaulting to yes) - used for anything
@@ -278,6 +284,7 @@ migrate_into_local() {
 	fi
 	mkdir -p "$(dirname "$new")"
 	mv "$old" "$new"
+	local_changed "$new"
 	echo "  Moved $old to $new"
 }
 
@@ -317,7 +324,11 @@ gitignore_if_credentials() {
 	[ -f "$LOCAL_DIR/$name" ] && looks_like_credentials "$LOCAL_DIR/$name" || return 0
 	grep -qxF "$name" "$LOCAL_DIR/.gitignore" 2>/dev/null && return 0
 	printf '%s\n' "$name" >> "$LOCAL_DIR/.gitignore"
-	[ -d "$LOCAL_DIR/.git" ] && git -C "$LOCAL_DIR" rm -q --cached --ignore-unmatch -- "$name"
+	local_changed .gitignore
+	if [ -d "$LOCAL_DIR/.git" ] && git -C "$LOCAL_DIR" ls-files --error-unmatch -- "$name" >/dev/null 2>&1; then
+		git -C "$LOCAL_DIR" rm -q --cached -- "$name"
+		local_changed "$name"
+	fi
 	echo "  $LOCAL_DIR/$name looks like it holds passwords or tokens, so it's in $LOCAL_DIR/.gitignore - still used, just never committed"
 }
 
@@ -356,6 +367,7 @@ link_local_file() {
 				return 0
 			fi
 			mv "$home_file" "$local_file"
+			local_changed "$local_file"
 			echo "  Moved ~/$2 to $local_file"
 		elif cmp -s "$home_file" "$local_file"; then
 			mv "$home_file" "$home_file.bak.$TIMESTAMP"
@@ -404,6 +416,7 @@ ensure_secrets_sourced() {
 		cat "$shell_local.bak.$TIMESTAMP"
 	} > "$shell_local"
 	echo "  Added a line to $shell_local that sources $LOCAL_DIR/secrets.sh"
+	local_changed "$shell_local"
 }
 
 setup_local_dir() {
@@ -422,8 +435,10 @@ setup_local_dir() {
 	# to become a repo later with nothing to fill in by hand.
 	if [ ! -f "$LOCAL_DIR/.gitignore" ]; then
 		printf '.DS_Store\n*.bak.*\nsecrets.sh\n' > "$LOCAL_DIR/.gitignore"
+		local_changed .gitignore
 	elif ! grep -qxF secrets.sh "$LOCAL_DIR/.gitignore"; then
 		printf 'secrets.sh\n' >> "$LOCAL_DIR/.gitignore"
+		local_changed .gitignore
 		echo "  Added secrets.sh to $LOCAL_DIR/.gitignore"
 	fi
 	if [ ! -f "$LOCAL_DIR/README.md" ]; then
@@ -462,6 +477,7 @@ pre-commit hook on, or just re-run install.sh).
 
 Created by install.sh - see the "Local setup" section of the dotfiles README for details.
 EOF
+		local_changed README.md
 	fi
 
 	if [ ! -f "$LOCAL_DIR/secrets.sh" ]; then
@@ -483,6 +499,7 @@ EOF
 
 	if [ ! -f "$LOCAL_DIR/shell_local.sh" ]; then
 		cp "$DOTFILES/local.example.sh" "$LOCAL_DIR/shell_local.sh"
+		local_changed shell_local.sh
 		echo "  Created $LOCAL_DIR/shell_local.sh from local.example.sh - fill it in for this machine"
 	fi
 	ensure_secrets_sourced
@@ -494,6 +511,7 @@ EOF
 # e.g. personal and work email addresses, employer/client names,
 # server hostnames, IP addresses, your home folder name.
 EOF
+		local_changed dotfiles_blocklist
 		echo "  Created $LOCAL_DIR/dotfiles_blocklist - add personal strings the pre-commit hook should block"
 	fi
 
@@ -589,6 +607,7 @@ fi
 exit $status
 EOF
 		chmod +x "$LOCAL_DIR/.githooks/pre-commit"
+		local_changed .githooks/pre-commit
 	fi
 
 	if [ -d "$LOCAL_DIR/.git" ] &&
@@ -602,15 +621,34 @@ EOF
 # setup_local_dir creates it, or after setup_git adds $LOCAL_DIR/gitconfig to it later. Falls back to
 # a generic identity so the commit doesn't depend on git user.name/email being set up yet.
 commit_local_changes() {
-	[ -d "$LOCAL_DIR/.git" ] || return 0
-	[ -n "$(git -C "$LOCAL_DIR" status --porcelain 2>/dev/null)" ] || return 0
-	git -C "$LOCAL_DIR" add -A
+	local message="$1" path others
+	local to_add=()
+	if [ ! -d "$LOCAL_DIR/.git" ] || [ ${#LOCAL_CHANGED[@]} -eq 0 ]; then
+		LOCAL_CHANGED=()
+		return 0
+	fi
+	# Anything already staged that isn't from this run would be swept into the commit - leave it all
+	# for you to commit instead
+	others="$(git -C "$LOCAL_DIR" diff --cached --name-only 2>/dev/null | grep -vxF -f <(printf '%s\n' "${LOCAL_CHANGED[@]}") || true)"
+	if [ -n "$others" ]; then
+		warning "$LOCAL_DIR has other changes staged ($(printf '%s' "$others" | paste -sd ' ' -)), so install.sh didn't commit its own ($(printf '%s\n' "${LOCAL_CHANGED[@]}" | sort -u | paste -sd ' ' -)) - commit them yourself"
+		LOCAL_CHANGED=()
+		return 0
+	fi
+	for path in "${LOCAL_CHANGED[@]}"; do
+		# Gitignored files aren't committed; nor are ones already removed from the index (gitignore_if_credentials)
+		git -C "$LOCAL_DIR" check-ignore -q -- "$path" && continue
+		[ -e "$LOCAL_DIR/$path" ] && to_add+=("$path")
+	done
+	[ ${#to_add[@]} -eq 0 ] || git -C "$LOCAL_DIR" add -- "${to_add[@]}"
+	LOCAL_CHANGED=()
+	git -C "$LOCAL_DIR" diff --cached --quiet && return 0
 	# A failed commit (e.g. its pre-commit hook found a secret) leaves the changes staged rather than
 	# stopping install.sh halfway
 	if ! git -C "$LOCAL_DIR" \
 		-c user.name="$(git config --global user.name 2>/dev/null || id -un)" \
 		-c user.email="$(git config --global user.email 2>/dev/null || echo "$(id -un)@localhost")" \
-		commit -q -m "$1"; then
+		commit -q -m "$message"; then
 		warning "couldn't commit the changes in $LOCAL_DIR (see above) - they're staged there, ready to commit once that's fixed"
 	fi
 }
@@ -829,6 +867,7 @@ setup_local_gitconfig() {
 		if [ -s "$gitconfig.tmp-local" ] &&
 			ask_yes_no "  Move $gitconfig's personal settings into $local_gitconfig, so they're versioned with everything else there?" y; then
 			mv "$gitconfig.tmp-local" "$local_gitconfig"
+			local_changed "$local_gitconfig"
 			cp "$gitconfig" "$gitconfig.local-migration.bak.$TIMESTAMP"
 			# Everything but the shared include was just moved out, so replace the whole file with
 			# a fresh copy of just that - rather than try to subtract it back out of $gitconfig,
@@ -841,6 +880,7 @@ setup_local_gitconfig() {
 				echo "  Leaving $gitconfig's personal settings where they are - still used from there, just not versioned with $LOCAL_DIR"
 			rm -f "$gitconfig.tmp-local"
 			: > "$local_gitconfig"
+			local_changed "$local_gitconfig"
 		fi
 	fi
 

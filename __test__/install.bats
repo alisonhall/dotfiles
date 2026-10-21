@@ -638,7 +638,8 @@ checksum() { cksum < "$1"; }
 	[ "$status" -eq 0 ]
 	[ "$(readlink "$HOME/.npmrc")" = "$LOCAL_DIR/npmrc" ]
 	[ "$(readlink "$HOME/.m2/settings.xml")" = "$LOCAL_DIR/m2-settings.xml" ]
-	[ -z "$(git -C "$LOCAL_DIR" status --porcelain)" ]    # Committed in local/
+	# They're your files, not install.sh's, so it leaves committing them to you
+	[ "$(git -C "$LOCAL_DIR" status --porcelain -- npmrc m2-settings.xml | wc -l | tr -d ' ')" -eq 2 ]
 	call setup_local_links
 	[[ "$output" != *"Linked ~/"* ]] || false
 }
@@ -682,8 +683,75 @@ checksum() { cksum < "$1"; }
 	chmod +x "$LOCAL_DIR/.githooks/pre-commit"
 	git -C "$LOCAL_DIR" config core.hooksPath .githooks
 	printf 'x\n' > "$LOCAL_DIR/file"
-	call commit_local_changes "Test"
+	call eval 'local_changed "$LOCAL_DIR/file"; commit_local_changes Test'
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"WARNING: couldn't commit the changes in $LOCAL_DIR"* ]] || false
 	[ -n "$(git -C "$LOCAL_DIR" diff --cached --name-only)" ]
+}
+
+#   -------------------------------
+#   local/ as your own private repo (its own loader, README, gitconfig, install.sh...)
+#   -------------------------------
+
+# private_repo_local: LOCAL_DIR as a clone of a private repo would be, already committed
+private_repo_local() {
+	mkdir -p "$LOCAL_DIR/shell" "$LOCAL_DIR/profiles/work"
+	git init -q "$LOCAL_DIR"
+	printf '%s\n' '# My loader' '[ -f "$DOTFILES/local/secrets.sh" ] && source "$DOTFILES/local/secrets.sh"' \
+		'for f in "$DOTFILES/local/shell/"*.sh; do source "$f"; done' > "$LOCAL_DIR/shell_local.sh"
+	printf '# My private repo\n' > "$LOCAL_DIR/README.md"
+	printf '[user]\n\temail = me@example.com\n' > "$LOCAL_DIR/gitconfig"
+	printf '.DS_Store\n*.bak.*\nsecrets.sh\nmachine.sh\n' > "$LOCAL_DIR/.gitignore"
+	printf 'my-blocked-string\n' > "$LOCAL_DIR/dotfiles_blocklist"
+	printf 'export A=1\n' > "$LOCAL_DIR/shell/common.sh"
+	printf 'export WORK=1\n' > "$LOCAL_DIR/profiles/work/shell.sh"
+	git -C "$LOCAL_DIR" add -A
+	git -C "$LOCAL_DIR" -c user.name=Me -c user.email=me@example.com commit -q -m "My private repo"
+}
+
+@test "private-repo local/: install.sh adds only what's missing, and leaves your own files as they are" {
+	private_repo_local
+	before="$(cd "$LOCAL_DIR" && cksum shell_local.sh README.md gitconfig .gitignore dotfiles_blocklist shell/common.sh)"
+	call setup_local_dir
+	[ "$status" -eq 0 ]
+	[ "$(cd "$LOCAL_DIR" && cksum shell_local.sh README.md gitconfig .gitignore dotfiles_blocklist shell/common.sh)" = "$before" ]
+	[ -f "$LOCAL_DIR/secrets.sh" ]
+	[ -x "$LOCAL_DIR/.githooks/pre-commit" ]
+	# Its one commit holds just the hook it added
+	[ "$(git -C "$LOCAL_DIR" show --name-only --format= HEAD)" = .githooks/pre-commit ]
+}
+
+@test "private-repo local/: install.sh doesn't commit your own unfinished edits" {
+	private_repo_local
+	printf 'export WORK=2  # half-finished\n' > "$LOCAL_DIR/profiles/work/shell.sh"
+	printf 'export NEW=1\n' > "$LOCAL_DIR/shell/new.sh"
+	call setup_local_dir
+	[ "$status" -eq 0 ]
+	[ -z "$(git -C "$LOCAL_DIR" show --name-only --format= HEAD -- profiles/work/shell.sh shell/new.sh)" ]
+	[[ "$(git -C "$LOCAL_DIR" status --porcelain)" == *"M profiles/work/shell.sh"*"?? shell/new.sh"* ]] || false
+}
+
+@test "private-repo local/: with your own changes staged, install.sh commits nothing and says why" {
+	private_repo_local
+	printf 'export WORK=2\n' > "$LOCAL_DIR/profiles/work/shell.sh"
+	git -C "$LOCAL_DIR" add profiles/work/shell.sh
+	head_before="$(git -C "$LOCAL_DIR" rev-parse HEAD)"
+	call setup_local_dir
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"WARNING: $LOCAL_DIR has other changes staged (profiles/work/shell.sh), so install.sh didn't commit its own (.githooks/pre-commit)"* ]] || false
+	[ "$(git -C "$LOCAL_DIR" rev-parse HEAD)" = "$head_before" ]
+	# Your staged change is still staged, as you left it
+	[ "$(git -C "$LOCAL_DIR" diff --cached --name-only)" = profiles/work/shell.sh ]
+}
+
+@test "private-repo local/: runs its install.sh after git is set up, and a second run commits nothing" {
+	private_repo_local
+	printf '#!/usr/bin/env bash\ngit config --global --get-all include.path | grep -qF "local/gitconfig" && echo "local gitconfig is included"\n' > "$LOCAL_DIR/install.sh"
+	git -C "$LOCAL_DIR" add install.sh
+	git -C "$LOCAL_DIR" -c user.name=Me -c user.email=me@example.com commit -q -m "Add install.sh"
+	call eval 'setup_local_dir; setup_git; run_local_install'
+	[[ "$output" == *"local gitconfig is included"* ]] || false
+	head_after_first="$(git -C "$LOCAL_DIR" rev-parse HEAD)"
+	call eval 'setup_local_dir; setup_git; run_local_install; setup_local_links'
+	[ "$(git -C "$LOCAL_DIR" rev-parse HEAD)" = "$head_after_first" ]
 }
