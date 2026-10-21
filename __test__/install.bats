@@ -182,6 +182,24 @@ checksum() { cksum < "$1"; }
 	[ "$(git -C "$LOCAL_DIR" log --oneline | wc -l | tr -d ' ')" -eq 1 ]
 }
 
+@test "setup_local_dir: asks before creating LOCAL_DIR as a git repo, and a declined answer leaves it a plain folder" {
+	call_answering n setup_local_dir
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"Created $LOCAL_DIR as a plain folder"* ]] || false
+	[ -d "$LOCAL_DIR" ]
+	[ ! -d "$LOCAL_DIR/.git" ]
+	[ ! -f "$LOCAL_DIR/.gitignore" ]
+	[ -f "$LOCAL_DIR/shell_local.sh" ]
+	[ -f "$LOCAL_DIR/dotfiles_blocklist" ]
+}
+
+@test "setup_local_dir: doesn't re-ask the git-repo question once LOCAL_DIR already exists" {
+	call_answering n setup_local_dir
+	call setup_local_dir
+	[ "$status" -eq 0 ]
+	[ ! -d "$LOCAL_DIR/.git" ]
+}
+
 @test "setup_local_dir: moves an existing ~/.shell_local, ~/.p10k.zsh and ~/.dotfiles_blocklist in" {
 	printf 'export NAME=Me\n' > "$HOME/.shell_local"
 	printf 'existing p10k config\n' > "$HOME/.p10k.zsh"
@@ -217,7 +235,8 @@ checksum() { cksum < "$1"; }
 
 @test "setup_local_dir: asks before moving ~/.p10k.zsh, and a declined answer leaves it in place" {
 	printf 'existing p10k config\n' > "$HOME/.p10k.zsh"
-	call_answering n setup_local_dir
+	# First answer accepts the git-repo question, second declines the p10k move
+	call_answering $'y\nn' setup_local_dir
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"Leaving $HOME/.p10k.zsh where it is"* ]] || false
 	[ -f "$HOME/.p10k.zsh" ]
@@ -226,7 +245,7 @@ checksum() { cksum < "$1"; }
 
 @test "setup_local_dir: an accepted answer moves ~/.p10k.zsh" {
 	printf 'existing p10k config\n' > "$HOME/.p10k.zsh"
-	call_answering y setup_local_dir
+	call_answering $'y\ny' setup_local_dir
 	[ "$status" -eq 0 ]
 	[ ! -e "$HOME/.p10k.zsh" ]
 	[ "$(cat "$LOCAL_DIR/p10k.zsh")" = "existing p10k config" ]

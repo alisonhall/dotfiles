@@ -296,11 +296,15 @@ active_local_file() {
 
 setup_local_dir() {
 	echo "Local setup:"
-	if [ ! -d "$LOCAL_DIR/.git" ]; then
+	if [ ! -e "$LOCAL_DIR" ]; then
 		mkdir -p "$LOCAL_DIR"
-		git init -q "$LOCAL_DIR"
-		printf '.DS_Store\n*.bak.*\n' > "$LOCAL_DIR/.gitignore"
-		echo "  Created $LOCAL_DIR with its own git repo for this machine's files"
+		if ask_yes_no "  Set up $LOCAL_DIR as its own git repo, so it's versioned independently of this one?" y; then
+			git init -q "$LOCAL_DIR"
+			printf '.DS_Store\n*.bak.*\n' > "$LOCAL_DIR/.gitignore"
+			echo "  Created $LOCAL_DIR with its own git repo for this machine's files"
+		else
+			echo "  Created $LOCAL_DIR as a plain folder - its files still work, just without their own history, diffs or backups. Run 'git init' in it yourself later if you change your mind."
+		fi
 	fi
 
 	migrate_into_local "$HOME/.shell_local" "$LOCAL_DIR/shell_local.sh"

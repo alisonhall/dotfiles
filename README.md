@@ -34,7 +34,7 @@ The installer doesn't replace your existing config files. It:
 
 - adds a small block to `~/.bashrc`, `~/.bash_profile` and `~/.zshrc` that loads `shell/` from this repo, creating the files if needed. If the block is already there but out of date (e.g. you moved the repo), it's updated in place. If a file has two blocks, or a block with a missing marker line, it stops and asks you to fix it by hand rather than risk deleting your own lines. `~/.bash_profile` is skipped if it, or `~/.profile` on Linux, already loads `~/.bashrc`
 - adds an include for `git/gitconfig` to the top of `~/.gitconfig` and backs up the original first, removing includes of a dotfiles gitconfig that no longer exists. If the include has been moved further down (where it would override your settings above it), it's moved back to the top
-- creates `local/` (see below) with its own git repo, or creates `local/shell_local.sh` from [local.example.sh](local.example.sh) if there's nothing to move yet
+- creates `local/` (see below), asking first whether to set it up as its own git repo (defaulting to yes), and creates `local/shell_local.sh` from [local.example.sh](local.example.sh) if there's nothing to move yet
 - moves an existing `~/.shell_local` and `~/.dotfiles_blocklist` into `local/` automatically; asks first before moving an existing `~/.p10k.zsh` or the settings below the include in `~/.gitconfig` (defaulting to yes). Say no (or just leave the file where it is) and everything keeps working from its original location - see [Local setup](#local-setup)
 - on macOS, points iTerm at `config/iterm` for its settings
 - installs gitleaks if it's missing (see [Committing](#committing))
@@ -56,11 +56,13 @@ Put anything personal, work-specific or specific to one computer in the local fi
 
 ### Local setup
 
-`local/` is an optional place to keep everything from the table above that's specific to this machine - shell settings, git identity, the commit-blocklist, an optional prompt override - together, as its own git repo (ignored by this one, via `.gitignore`), so it can be versioned, diffed and even backed up to your own private remote, independently of this shared repo.
+`local/` is an optional place to keep everything from the table above that's specific to this machine - shell settings, git identity, the commit-blocklist, an optional prompt override - together (it's ignored by this repo, via `.gitignore`). Normally it's its own git repo too, so it can be versioned, diffed and even backed up to your own private remote, independently of this shared repo.
 
 Nothing requires using it, though: `shell/bashrc.sh` and `shell/zshrc.sh` check `local/shell_local.sh` first and fall back to `~/.shell_local` if that's what you have; `shell/zshrc.sh` does the same for `local/p10k.zsh` vs `~/.p10k.zsh`; and `.githooks/pre-commit` checks `local/dotfiles_blocklist` before falling back to `~/.dotfiles_blocklist`. A gitconfig setting (`user.name`, `user.email`, anything else) works identically whether it's in `local/gitconfig` or directly in `~/.gitconfig` below the include - git doesn't care which.
 
-`install.sh` creates `local/` the first time it runs. It moves an existing `~/.shell_local` and `~/.dotfiles_blocklist` into it automatically (there's no real downside to that move, so it doesn't ask); for `~/.p10k.zsh` and whatever's below the include in `~/.gitconfig`, it asks first, defaulting to yes. **Answering no doesn't break anything** - the shell and git fallbacks above mean that file keeps working exactly as before, from its original location. The only difference is that it isn't versioned, diffed or backed up alongside everything else in `local/`.
+`install.sh` creates `local/` the first time it runs, asking first whether to set it up as its own git repo (defaulting to yes). **Answering no doesn't break anything** - every file in `local/` still works exactly the same; it just isn't versioned, diffed or backed up on its own, since there's no repo there to do that. You can turn it into one later by running `git init` in it yourself.
+
+It moves an existing `~/.shell_local` and `~/.dotfiles_blocklist` into `local/` automatically (there's no real downside to that move, so it doesn't ask); for `~/.p10k.zsh` and whatever's below the include in `~/.gitconfig`, it asks first, defaulting to yes. **Answering no doesn't break anything** here either - the shell and git fallbacks above mean that file keeps working exactly as before, from its original location. The only difference is that it isn't versioned, diffed or backed up alongside everything else in `local/`.
 
 `install.sh` adds a second include for `local/gitconfig` to `~/.gitconfig`, right after the shared one (so it still overrides it), whether or not you accept moving anything into it.
 
