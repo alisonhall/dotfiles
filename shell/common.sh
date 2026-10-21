@@ -93,8 +93,29 @@ path_front () {
 # otherwise npm's own default of ~/.npmrc
 [ -f "$DOTFILES/local/npmrc" ] && export NPM_CONFIG_USERCONFIG="$DOTFILES/local/npmrc"
 
-# Maven: same idea as npm above, via MAVEN_ARGS (Maven 3.9.1+) instead of ~/.m2/settings.xml
-[ -f "$DOTFILES/local/m2-settings.xml" ] && export MAVEN_ARGS="--settings $DOTFILES/local/m2-settings.xml"
+# Maven: local/m2-settings.xml if this machine has one (same idea as npm above), otherwise Maven's
+# own default of ~/.m2/settings.xml. A wrapper rather than MAVEN_ARGS, which Maven splits on spaces,
+# so a repo path with a space in it would break. oh-my-zsh's mvn plugin aliases mvn to mvn-or-mvnw
+# (a project's ./mvnw if it has one), so that alias is replaced by this, which calls mvn-or-mvnw
+# itself - the settings reach ./mvnw too. Leaves your own -s/--settings alone.
+{ [ -n "${ZSH_VERSION:-}" ] && unalias mvn 2>/dev/null; } || true
+function mvn {
+	local maven=(command mvn) arg
+	typeset -f mvn-or-mvnw >/dev/null 2>&1 && maven=(mvn-or-mvnw)
+	if [ ! -f "$DOTFILES/local/m2-settings.xml" ]; then
+		"${maven[@]}" "$@"
+		return
+	fi
+	for arg in "$@"; do
+		case "$arg" in
+			-s | --settings | --settings=*)
+				"${maven[@]}" "$@"
+				return
+				;;
+		esac
+	done
+	"${maven[@]}" --settings "$DOTFILES/local/m2-settings.xml" "$@"
+}
 
 command -v rbenv >/dev/null 2>&1 && eval "$(rbenv init -)"
 

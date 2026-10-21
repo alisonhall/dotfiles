@@ -84,21 +84,43 @@ npm_config_line() { piece '^# npm: local' '^\[ -f "\$DOTFILES'; }
 #   Maven
 #   -------------------------------
 
-maven_args_line() { piece '^# Maven: same idea' '^\[ -f "\$DOTFILES'; }
-
-@test "Maven: points MAVEN_ARGS at local/m2-settings.xml when this machine has one" {
-	mkdir -p "$DIRS/dotfiles/local"
-	: > "$DIRS/dotfiles/local/m2-settings.xml"
-	code="$(maven_args_line)"
-	run env DOTFILES="$DIRS/dotfiles" bash -c "$code"$'\n''printf "%s\n" "$MAVEN_ARGS"'
-	[ "$output" = "--settings $DIRS/dotfiles/local/m2-settings.xml" ]
+# with_mvn [shell] <setup> <commands>: Run setup, define the mvn wrapper, then run commands (in
+# bash, or the shell given), with DOTFILES pointing at a repo whose local/ folder has a space in
+# its path, and a stand-in mvn on PATH that prints its arguments
+with_mvn() {
+	local shell=bash definition
+	[ $# -gt 2 ] && { shell="$1"; shift; }
+	definition="$(piece '^{ \[ -n "\${ZSH_VERSION' '^}')" || return 1
+	mkdir -p "$DIRS/bin" "$DIRS/dot files/local"
+	printf '#!/bin/sh\nfor a in "$@"; do printf "[%%s]" "$a"; done; echo\n' > "$DIRS/bin/mvn"
+	chmod +x "$DIRS/bin/mvn"
+	run env DOTFILES="$DIRS/dot files" PATH="$DIRS/bin:$PATH" "$shell" -c "$1"$'\n'"$definition"$'\n'"$2"
 }
 
-@test "Maven: leaves MAVEN_ARGS unset when this machine has no local/m2-settings.xml" {
-	mkdir -p "$DIRS/dotfiles/local"
-	code="$(maven_args_line)"
-	run env -u MAVEN_ARGS DOTFILES="$DIRS/dotfiles" bash -c "$code"$'\n''printf "%s\n" "${MAVEN_ARGS:-unset}"'
-	[ "$output" = "unset" ]
+@test "Maven: passes local/m2-settings.xml to mvn, even with a space in the path" {
+	with_mvn ': > "$DOTFILES/local/m2-settings.xml"' 'mvn clean install'
+	[ "$output" = "[--settings][$DIRS/dot files/local/m2-settings.xml][clean][install]" ]
+}
+
+@test "Maven: runs mvn as it is when this machine has no local/m2-settings.xml" {
+	with_mvn ':' 'mvn clean'
+	[ "$output" = "[clean]" ]
+}
+
+@test "Maven: leaves your own -s / --settings alone" {
+	with_mvn ': > "$DOTFILES/local/m2-settings.xml"' 'mvn -s other.xml package; mvn --settings=other.xml package'
+	[ "$output" = $'[-s][other.xml][package]\n[--settings=other.xml][package]' ]
+}
+
+@test "Maven: in zsh, replaces oh-my-zsh's mvn alias and goes through its mvn-or-mvnw" {
+	command -v zsh >/dev/null 2>&1 || skip "zsh isn't installed"
+	with_mvn zsh '
+		: > "$DOTFILES/local/m2-settings.xml"
+		mvn-or-mvnw() { echo "via mvn-or-mvnw"; command mvn "$@"; }
+		alias mvn=mvn-or-mvnw' '
+		eval "mvn verify"'
+	[ "$status" -eq 0 ]
+	[ "$output" = $'via mvn-or-mvnw\n[--settings]['"$DIRS/dot files/local/m2-settings.xml"'][verify]' ]
 }
 
 #   -------------------------------
