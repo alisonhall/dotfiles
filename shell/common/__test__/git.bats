@@ -63,3 +63,10 @@ dev_branch() {
 	dev_branch "$BATS_TEST_TMPDIR/not-a-repo"
 	[ "$output" = "main" ]
 }
+
+@test "loads in zsh without zsh's completion system (e.g. no oh-my-zsh), with no errors" {
+	command -v zsh >/dev/null 2>&1 || skip "zsh isn't installed"
+	run zsh -f -c 'source "$1" && echo loaded' _ "$GIT_SH"
+	[ "$status" -eq 0 ]
+	[ "$output" = loaded ]
+}

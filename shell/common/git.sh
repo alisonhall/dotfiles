@@ -130,7 +130,8 @@ _git_rename-local-and-remote-branch () { _git_branch; }
 # `_git-<alias>` (dash) function, via `compdef`. Bash has no `compdef`, so this
 # block only runs under zsh, even though this file is also loaded by bash.
 if [ -n "$ZSH_VERSION" ]; then
-	compdef _git g=git
+	# compdef only exists once zsh's completion system is set up (oh-my-zsh does that)
+	command -v compdef >/dev/null 2>&1 && compdef _git g=git
 
 	# Branch-name completion (arg = local branch)
 	_git-bclean () { __git_branch_names; }
