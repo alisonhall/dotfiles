@@ -1,5 +1,6 @@
 {
   "update.mode": "none",
+  "terminal.integrated.fontFamily": "MesloLGS NF",
   "[json]": {
     "editor.defaultFormatter": "esbenp.prettier-vscode"
   },

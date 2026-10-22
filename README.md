@@ -108,10 +108,16 @@ Unlike the shell and git config, `config/vscode/` isn't linked in automatically 
 
 | File | Contents |
 | --- | --- |
-| `config/vscode/settings.json` | User settings: formatter/ESLint/import-organizing on save, GitLens graph options, Jest run mode |
+| `config/vscode/settings.json` | User settings: the terminal font, formatter/ESLint/import-organizing on save, GitLens graph options, Jest run mode |
 | `config/vscode/global.code-snippets` | Global snippets (JS/TS/React scaffolding) |
 
 To use them, copy or symlink `config/vscode/settings.json` to VS Code's user `settings.json` (`code --locate-shell-integration-path` or Cmd+Shift+P → "Preferences: Open User Settings (JSON)" shows the path), and `config/vscode/global.code-snippets` into the same folder's `snippets/`. Merge rather than overwrite if you already have machine- or work-specific settings there.
+
+**Prompt icons in VS Code's terminal:** the zsh prompt's icons need an icon font, but VS Code's terminal doesn't use iTerm's settings - it uses `terminal.integrated.fontFamily` from VS Code's own settings, falling back to the editor font (usually without the icons). `config/vscode/settings.json` sets it to `MesloLGS NF`, the font `install.sh` installs for the prompt and `config/iterm` uses. If you don't copy the whole file, add just that setting:
+
+```json
+"terminal.integrated.fontFamily": "MesloLGS NF"
+```
 
 ## Scripts
 
