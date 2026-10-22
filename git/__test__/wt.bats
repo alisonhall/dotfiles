@@ -636,7 +636,7 @@ quote_cases() {
 			REPLY=""
 			if _wt_quote_branch_arg "$line"; then echo "$line => $REPLY"; else echo "$line => unchanged"; fi
 		done' _ "$WT" \
-		'orx-wt cd mmotam/TA34362520/Allergies-and-Diseases-&-Member-To-Do' \
+		'shop-wt cd yourname/TICKET-123/Login-&-Signup-Pages' \
 		'wt add fix(a);b|c' \
 		'  shop-wt cd a&b  ' \
 		'wt cd feature/plain-name_1.2' \
@@ -651,7 +651,7 @@ quote_cases() {
 		$'wt cd a&b\nls'
 }
 
-QUOTE_EXPECTED="orx-wt cd mmotam/TA34362520/Allergies-and-Diseases-&-Member-To-Do => orx-wt cd 'mmotam/TA34362520/Allergies-and-Diseases-&-Member-To-Do'
+QUOTE_EXPECTED="shop-wt cd yourname/TICKET-123/Login-&-Signup-Pages => shop-wt cd 'yourname/TICKET-123/Login-&-Signup-Pages'
 wt add fix(a);b|c => wt add 'fix(a);b|c'
   shop-wt cd a&b   => shop-wt cd 'a&b'
 wt cd feature/plain-name_1.2 => unchanged
@@ -684,7 +684,7 @@ ls => unchanged"
 	zsh -fc 'zmodload zsh/zpty' 2>/dev/null || skip "zsh has no zpty module"
 	export OUT="$BATS_TEST_TMPDIR/args"
 	# Type the line into a real interactive zsh, through a pseudo-terminal, so Enter goes through
-	# its line editor as it would for a person. orx-wt stands in for a per-repo command. Each line
+	# its line editor as it would for a person. shop-wt stands in for a per-repo command. Each line
 	# is typed only once zsh shows a prompt, since what's typed while it starts can be dropped.
 	run zsh -fc '
 		zmodload zsh/zpty
@@ -704,9 +704,9 @@ ls => unchanged"
 		wait_for "*[%#]*" || fail "no first prompt"
 		# (The new prompt is written in two parts, so that typing it doesn'"'"'t match it)
 		screen=""
-		zpty -w t "PS1=\"wt-\"\"ready> \"; source \"$1/wt.sh\"; orx-wt() { print -r -- \"[\$#] \$*\" > \"\$OUT\" }"
+		zpty -w t "PS1=\"wt-\"\"ready> \"; source \"$1/wt.sh\"; shop-wt() { print -r -- \"[\$#] \$*\" > \"\$OUT\" }"
 		wait_for "*wt-ready> *" || fail "no prompt after loading wt.sh"
-		zpty -w t "orx-wt cd mmotam/TA34362520/Allergies-and-Diseases-&-Member-To-Do"
+		zpty -w t "shop-wt cd yourname/TICKET-123/Login-&-Signup-Pages"
 		# Reading what zsh shows while waiting, as a terminal would: on macOS, a pseudo-terminal holds
 		# so little that zsh stalls drawing the line, before running it, until someone reads it
 		for i in {1..100}; do
@@ -714,11 +714,11 @@ ls => unchanged"
 			[[ -s $OUT ]] && break
 			sleep 0.1
 		done
-		[[ -s $OUT ]] || { wait_for "*wt-ready> *wt-ready> *"; fail "orx-wt wasn'"'"'t run"; }
+		[[ -s $OUT ]] || { wait_for "*wt-ready> *wt-ready> *"; fail "shop-wt wasn'"'"'t run"; }
 		zpty -d t
 		cat "$OUT"' _ "$WT"
 	[ "$status" -eq 0 ] || { echo "$output" | cat -v >&2; false; }
-	[ "$output" = "[2] cd mmotam/TA34362520/Allergies-and-Diseases-&-Member-To-Do" ]
+	[ "$output" = "[2] cd yourname/TICKET-123/Login-&-Signup-Pages" ]
 }
 
 @test "zsh loads wt even with FUNCTION_ARGZERO off" {
