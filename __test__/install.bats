@@ -19,6 +19,9 @@ setup() {
 	# LOCAL_DIR must be sandboxed explicitly - otherwise a test touches this checkout's own local/
 	LOCAL_DIR="$BATS_TEST_TMPDIR/local"
 	export DOTFILES_LOCAL_DIR="$LOCAL_DIR"
+	# The pre-commit hook install.sh gives LOCAL_DIR refuses to commit without gitleaks, which CI
+	# doesn't install - so install.sh's own commits there would fail, leaving its changes staged
+	export SKIP_GITLEAKS=1
 }
 
 # native <path>: The path as install.sh writes it to git config (C:/... form on Windows)
@@ -51,6 +54,19 @@ call_answering() {
 }
 
 checksum() { cksum < "$1"; }
+
+# symlink <target> <link>: A real symlink, made the way install.sh's make_link makes one. In Git
+# Bash, a plain ln -s quietly copies the target instead (and fails if there's nothing to copy).
+symlink() { MSYS=winsymlinks:nativestrict ln -s "$1" "$2"; }
+
+# needs_symlinks: Skips the test where symlinks can't be made - Windows without Developer Mode or
+# admin rights. (install.sh then says how to turn them on, and leaves the files as they are.)
+needs_symlinks() {
+	touch "$BATS_TEST_TMPDIR/symlink-target"
+	symlink "$BATS_TEST_TMPDIR/symlink-target" "$BATS_TEST_TMPDIR/symlink-check" 2>/dev/null ||
+		skip "this system won't make symlinks (on Windows, turn on Developer Mode)"
+	rm -f "$BATS_TEST_TMPDIR/symlink-check" "$BATS_TEST_TMPDIR/symlink-target"
+}
 
 #   -------------------------------
 #   markers_paired
@@ -163,7 +179,10 @@ checksum() { cksum < "$1"; }
 	printf 'export NAME=Me\nif [ -n "$NAME" ' > "$HOME/.shell_local" # missing ]; then ...; fi
 	MODE_FLAG=--check call check_startup_files
 	[[ "$output" == *"$HOME/.shell_local has a bash syntax error"* ]] || false
-	[[ "$output" == *"$HOME/.shell_local has a zsh syntax error"* ]] || false
+	# (Only checked with the shells that are installed - Git Bash has no zsh)
+	if command -v zsh >/dev/null 2>&1; then
+		[[ "$output" == *"$HOME/.shell_local has a zsh syntax error"* ]] || false
+	fi
 }
 
 #   -------------------------------
@@ -519,6 +538,7 @@ checksum() { cksum < "$1"; }
 #   -------------------------------
 
 @test "link_local_file: links ~/.npmrc to local/npmrc when only the local copy exists" {
+	needs_symlinks
 	mkdir -p "$LOCAL_DIR"
 	printf 'registry=https://example.com/\n' > "$LOCAL_DIR/npmrc"
 	call link_local_file npmrc .npmrc
@@ -529,6 +549,7 @@ checksum() { cksum < "$1"; }
 }
 
 @test "link_local_file: creates ~/.m2 for Maven's settings.xml" {
+	needs_symlinks
 	mkdir -p "$LOCAL_DIR"
 	printf '<settings/>\n' > "$LOCAL_DIR/m2-settings.xml"
 	call link_local_file m2-settings.xml .m2/settings.xml
@@ -536,6 +557,7 @@ checksum() { cksum < "$1"; }
 }
 
 @test "link_local_file: asks to move an existing ~/.npmrc into local/, then links it back" {
+	needs_symlinks
 	mkdir -p "$LOCAL_DIR"
 	printf 'registry=https://example.com/\n' > "$HOME/.npmrc"
 	call_answering y link_local_file npmrc .npmrc
@@ -554,6 +576,7 @@ checksum() { cksum < "$1"; }
 }
 
 @test "link_local_file: an identical ~/.npmrc is backed up and replaced with the link" {
+	needs_symlinks
 	mkdir -p "$LOCAL_DIR"
 	printf 'same\n' > "$LOCAL_DIR/npmrc"
 	printf 'same\n' > "$HOME/.npmrc"
@@ -574,24 +597,30 @@ checksum() { cksum < "$1"; }
 }
 
 @test "link_local_file: leaves a ~/.npmrc that links somewhere else on purpose" {
+	needs_symlinks
 	mkdir -p "$LOCAL_DIR"
 	printf 'local\n' > "$LOCAL_DIR/npmrc"
 	printf 'elsewhere\n' > "$BATS_TEST_TMPDIR/other-npmrc"
-	ln -s "$BATS_TEST_TMPDIR/other-npmrc" "$HOME/.npmrc"
+	symlink "$BATS_TEST_TMPDIR/other-npmrc" "$HOME/.npmrc"
 	call link_local_file npmrc .npmrc
 	[[ "$output" == *"~/.npmrc links to $BATS_TEST_TMPDIR/other-npmrc"*"leaving it as it is"* ]] || false
 	[ "$(readlink "$HOME/.npmrc")" = "$BATS_TEST_TMPDIR/other-npmrc" ]
 }
 
 @test "link_local_file: re-points a broken link (e.g. after the repo moved)" {
-	mkdir -p "$LOCAL_DIR"
+	needs_symlinks
+	mkdir -p "$LOCAL_DIR" "$BATS_TEST_TMPDIR/old-repo/local"
 	printf 'local\n' > "$LOCAL_DIR/npmrc"
-	ln -s "$BATS_TEST_TMPDIR/old-repo/local/npmrc" "$HOME/.npmrc"
+	# Linked while the old copy existed, then the repo moved away (Windows can't link to nothing)
+	printf 'old\n' > "$BATS_TEST_TMPDIR/old-repo/local/npmrc"
+	symlink "$BATS_TEST_TMPDIR/old-repo/local/npmrc" "$HOME/.npmrc"
+	rm -r "$BATS_TEST_TMPDIR/old-repo"
 	call link_local_file npmrc .npmrc
 	[ "$(readlink "$HOME/.npmrc")" = "$LOCAL_DIR/npmrc" ]
 }
 
 @test "link_local_file: does nothing when neither exists, or when it's already linked" {
+	needs_symlinks
 	mkdir -p "$LOCAL_DIR"
 	call link_local_file npmrc .npmrc
 	[ -z "$output" ]
@@ -603,6 +632,7 @@ checksum() { cksum < "$1"; }
 }
 
 @test "link_local_file: a file with a token or password is gitignored in local/, but still linked" {
+	needs_symlinks
 	mkdir -p "$LOCAL_DIR"
 	git init -q "$LOCAL_DIR"
 	printf '.DS_Store\n' > "$LOCAL_DIR/.gitignore"
@@ -631,6 +661,7 @@ checksum() { cksum < "$1"; }
 }
 
 @test "setup_local_links: links ~/.npmrc and ~/.m2/settings.xml, and a second run changes nothing" {
+	needs_symlinks
 	call setup_local_dir
 	printf 'registry=https://example.com/\n' > "$LOCAL_DIR/npmrc"
 	printf '<settings/>\n' > "$LOCAL_DIR/m2-settings.xml"
