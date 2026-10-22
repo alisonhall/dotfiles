@@ -1,5 +1,7 @@
 # dotfiles
 
+[![Test](https://github.com/alisonhall/dotfiles/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/alisonhall/dotfiles/actions/workflows/test.yml)
+
 Shell (bash/zsh) and git config shared across machines. Works on macOS, Linux and Git Bash on Windows.
 
 ## Install
