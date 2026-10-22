@@ -674,6 +674,8 @@ exit $status
 EOF
 		chmod +x "$LOCAL_DIR/.githooks/pre-commit"
 		local_changed .githooks/pre-commit
+	elif grep -qxF 'PATH="$PATH:$HOME/.local/bin"' "$LOCAL_DIR/.githooks/pre-commit"; then
+		upgrade_local_hook
 	fi
 
 	if [ -d "$LOCAL_DIR/.git" ] &&
@@ -681,6 +683,30 @@ EOF
 		git -C "$LOCAL_DIR" config core.hooksPath .githooks
 		echo "  Enabled pre-commit checks (secrets, shell syntax) for $LOCAL_DIR"
 	fi
+}
+
+# upgrade_local_hook: A pre-commit hook made by an older install.sh only looks for gitleaks in
+# ~/.local/bin, so a GUI git client (e.g. VS Code) without Homebrew's or winget's folder on PATH
+# can't find one installed there. Swaps in the current lines, leaving the rest of the hook as it is.
+upgrade_local_hook() {
+	local hook="$LOCAL_DIR/.githooks/pre-commit" saved updated
+	saved="$(backup "$hook")"
+	updated="$(awk '
+		$0 == "# install.sh may have put it in ~/.local/bin, which GUI git clients don'"'"'t have on PATH" { next }
+		$0 == "PATH=\"$PATH:$HOME/.local/bin\"" {
+			print "# Where install.sh may have put it, which GUI git clients (e.g. VS Code) may not have on PATH:"
+			print "# ~/.local/bin, Homebrew'"'"'s folder, or winget'"'"'s"
+			print "PATH=\"$PATH:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin\" # path-check: ignore (missing folders are skipped)"
+			print "if [ -n \"${LOCALAPPDATA:-}\" ] && command -v cygpath >/dev/null 2>&1; then"
+			print "\tPATH=\"$PATH:$(cygpath -u \"$LOCALAPPDATA\")/Microsoft/WinGet/Links\""
+			print "fi"
+			next
+		}
+		{ print }
+	' "$hook")"
+	printf '%s\n' "$updated" > "$hook"
+	echo "  Updated $hook to find gitleaks wherever install.sh installed it (old version in $saved)"
+	local_changed .githooks/pre-commit
 }
 
 # commit_local_changes <message>: Commits whatever's pending in $LOCAL_DIR, if anything - e.g. after

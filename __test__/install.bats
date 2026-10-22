@@ -283,6 +283,35 @@ needs_symlinks() {
 	[[ "$output" == *"bash syntax error in shell_local.sh"* ]] || false
 }
 
+@test "setup_local_dir: upgrades a pre-commit hook from an older install.sh that only looked for gitleaks in ~/.local/bin" {
+	call setup_local_dir
+	hook="$LOCAL_DIR/.githooks/pre-commit"
+	cp "$hook" "$BATS_TEST_TMPDIR/current-hook"
+	# The older hook's two lines, in place of the current six - plus a change of your own
+	awk '
+		/^# Where install.sh may have put it/ {
+			print "# install.sh may have put it in ~/.local/bin, which GUI git clients don'"'"'t have on PATH"
+			print "PATH=\"$PATH:$HOME/.local/bin\""
+			skip = 5; next
+		}
+		skip > 0 { skip--; next }
+		{ print }
+	' "$BATS_TEST_TMPDIR/current-hook" > "$hook"
+	echo "# my own check" >> "$hook"
+	grep -qxF 'PATH="$PATH:$HOME/.local/bin"' "$hook"
+
+	call setup_local_dir
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"Updated $hook"* ]] || false
+	diff <(cat "$BATS_TEST_TMPDIR/current-hook"; echo "# my own check") "$hook"
+	[ -x "$hook" ]
+	grep -qxF 'PATH="$PATH:$HOME/.local/bin"' "$(find "$LOCAL_DIR/backups" -name pre-commit)"
+
+	# Only once
+	call setup_local_dir
+	[[ "$output" != *"Updated $hook"* ]] || false
+}
+
 @test "setup_local_dir: moves an existing ~/.shell_local, ~/.p10k.zsh and ~/.dotfiles_blocklist in" {
 	printf 'export NAME=Me\n' > "$HOME/.shell_local"
 	printf 'existing p10k config\n' > "$HOME/.p10k.zsh"
