@@ -628,6 +628,75 @@ deleted_after_merge() {
 	[ "${lines[${#lines[@]} - 1]}" = 'fix(a);b' ]
 }
 
+# quote_cases <shell>: Run _wt_quote_branch_arg in <shell> on each line below, printing
+# "<line> => <REPLY>", or "<line> => unchanged"
+quote_cases() {
+	"$1" -c '. "$1/wt.sh"; shift
+		for line in "$@"; do
+			REPLY=""
+			if _wt_quote_branch_arg "$line"; then echo "$line => $REPLY"; else echo "$line => unchanged"; fi
+		done' _ "$WT" \
+		'orx-wt cd mmotam/TA34362520/Allergies-and-Diseases-&-Member-To-Do' \
+		'wt add fix(a);b|c' \
+		'  shop-wt cd a&b  ' \
+		'wt cd feature/plain-name_1.2' \
+		"wt cd 'a&b'" \
+		'wt cd "$branch"' \
+		'wt cd a\&b' \
+		'wt cd a && ls' \
+		'wt rm a&b' \
+		'wt-x cd a&b' \
+		'git cd a&b' \
+		'-wt cd a&b' \
+		$'wt cd a&b\nls'
+}
+
+QUOTE_EXPECTED="orx-wt cd mmotam/TA34362520/Allergies-and-Diseases-&-Member-To-Do => orx-wt cd 'mmotam/TA34362520/Allergies-and-Diseases-&-Member-To-Do'
+wt add fix(a);b|c => wt add 'fix(a);b|c'
+  shop-wt cd a&b   => shop-wt cd 'a&b'
+wt cd feature/plain-name_1.2 => unchanged
+wt cd 'a&b' => unchanged
+wt cd \"\$branch\" => unchanged
+wt cd a\\&b => unchanged
+wt cd a && ls => unchanged
+wt rm a&b => unchanged
+wt-x cd a&b => unchanged
+git cd a&b => unchanged
+-wt cd a&b => unchanged
+wt cd a&b
+ls => unchanged"
+
+@test "_wt_quote_branch_arg quotes just the branch name of a wt cd or add, and only when it needs it" {
+	run quote_cases bash
+	[ "$status" -eq 0 ]
+	[ "$output" = "$QUOTE_EXPECTED" ] || { diff <(echo "$output") <(echo "$QUOTE_EXPECTED") >&2; false; }
+}
+
+@test "_wt_quote_branch_arg does the same in zsh" {
+	command -v zsh >/dev/null 2>&1 || skip "zsh isn't installed"
+	run quote_cases zsh
+	[ "$status" -eq 0 ]
+	[ "$output" = "$QUOTE_EXPECTED" ] || { diff <(echo "$output") <(echo "$QUOTE_EXPECTED") >&2; false; }
+}
+
+@test "in an interactive zsh, a <name>-wt cd with an unquoted & reaches wt as one branch name" {
+	command -v zsh >/dev/null 2>&1 || skip "zsh isn't installed"
+	zsh -fc 'zmodload zsh/zpty' 2>/dev/null || skip "zsh has no zpty module"
+	export OUT="$BATS_TEST_TMPDIR/args"
+	# Type the line into a real interactive zsh, through a pseudo-terminal, so Enter goes through
+	# its line editor as it would for a person. orx-wt stands in for a per-repo command.
+	run zsh -fc '
+		zmodload zsh/zpty
+		zpty -b t "zsh -fi"
+		zpty -w t "source \"$1/wt.sh\"; orx-wt() { print -r -- \"[\$#] \$*\" > \"\$OUT\" }"
+		zpty -w t "orx-wt cd mmotam/TA34362520/Allergies-and-Diseases-&-Member-To-Do"
+		for i in {1..50}; do [[ -s $OUT ]] && break; sleep 0.1; done
+		zpty -d t
+		cat "$OUT"' _ "$WT"
+	[ "$status" -eq 0 ]
+	[ "$output" = "[2] cd mmotam/TA34362520/Allergies-and-Diseases-&-Member-To-Do" ]
+}
+
 @test "zsh loads wt even with FUNCTION_ARGZERO off" {
 	command -v zsh >/dev/null 2>&1 || skip "zsh isn't installed"
 	run zsh -f -c 'unsetopt function_argzero; source "$1/wt.sh" && whence -w wt && print -r -- "$WT_DIR"' _ "$WT"

@@ -71,6 +71,46 @@ if [ "$_wt_sourced" = "1" ]; then
         ;;
     esac
   }
+
+  # _wt_quote_branch_arg <line>: For a command line like `wt cd feature/a&b` or `shop-wt add x;y`
+  # (wt, or a per-repo <name>-wt command), sets REPLY to the line with the branch name in single
+  # quotes, and succeeds. Fails, leaving the line alone, unless there's exactly one name after
+  # cd or add, with a character the shell would act on and no quotes, \ or $ (which mean it's
+  # already quoted, or meant to be expanded). Branch names can't contain spaces, so anything
+  # after a space - like `wt cd x && ls` - is left for the shell, as typed.
+  _wt_quote_branch_arg() {
+    local cmd sub name extra
+    case "$1" in *$'\n'*) return 1 ;; esac
+    read -r cmd sub name extra <<< "$1"
+    [ -n "$name" ] && [ -z "$extra" ] || return 1
+    case "$cmd" in wt | ?*-wt) ;; *) return 1 ;; esac
+    case "$cmd" in *[!A-Za-z0-9_.-]*) return 1 ;; esac
+    case "$sub" in cd | add) ;; *) return 1 ;; esac
+    case "$name" in *[\'\"\\\$\`]*) return 1 ;; esac
+    case "$name" in *[!A-Za-z0-9._/@+=:,%-]*) ;; *) return 1 ;; esac
+    REPLY="$cmd $sub '$name'"
+  }
+
+  # In zsh, quote the branch name as Enter is pressed, before the shell reads the line - so a name
+  # pasted unquoted, like feature/a&b, isn't split at the &. (It wraps whatever accept-line already
+  # does, e.g. from a plugin; the line is saved in history with the quotes.)
+  if [ -n "${ZSH_VERSION:-}" ]; then
+    eval '
+      if [[ -o interactive ]] && zmodload zsh/zleparameter 2>/dev/null &&
+        [[ ${widgets[accept-line]-} != user:_wt_accept_line ]]; then
+        _wt_accept_line() {
+          local REPLY
+          if _wt_quote_branch_arg "$BUFFER"; then
+            BUFFER=$REPLY
+            CURSOR=${#BUFFER}
+          fi
+          zle _wt_orig_accept_line -- "$@"
+        }
+        zle -A accept-line _wt_orig_accept_line
+        zle -N accept-line _wt_accept_line
+      fi
+    '
+  fi
   return 0
 fi
 unset _wt_sourced
