@@ -707,7 +707,13 @@ ls => unchanged"
 		zpty -w t "PS1=\"wt-\"\"ready> \"; source \"$1/wt.sh\"; orx-wt() { print -r -- \"[\$#] \$*\" > \"\$OUT\" }"
 		wait_for "*wt-ready> *" || fail "no prompt after loading wt.sh"
 		zpty -w t "orx-wt cd mmotam/TA34362520/Allergies-and-Diseases-&-Member-To-Do"
-		for i in {1..100}; do [[ -s $OUT ]] && break; sleep 0.1; done
+		# Reading what zsh shows while waiting, as a terminal would: on macOS, a pseudo-terminal holds
+		# so little that zsh stalls drawing the line, before running it, until someone reads it
+		for i in {1..100}; do
+			while zpty -rt t chunk 2>/dev/null; do screen+=$chunk; done
+			[[ -s $OUT ]] && break
+			sleep 0.1
+		done
 		[[ -s $OUT ]] || { wait_for "*wt-ready> *wt-ready> *"; fail "orx-wt wasn'"'"'t run"; }
 		zpty -d t
 		cat "$OUT"' _ "$WT"
