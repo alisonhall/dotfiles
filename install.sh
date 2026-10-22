@@ -1113,9 +1113,10 @@ is_macos() { [ "$(uname -s)" = Darwin ]; }
 # Whether there's someone to ask (tests replace this). Without one, settings are reported, not applied.
 can_ask() { [ -t 0 ]; }
 
-# macos_entries: config/macos/defaults as "<domain> <key> <type> <value>" lines, without comments
+# macos_entries: config/macos/defaults without comments and blank lines, as "<domain> <key> <type>
+# <value>" lines (the value can contain spaces)
 macos_entries() {
-	sed -e 's/#.*//' "$MACOS_DEFAULTS" | awk 'NF == 4 { print $1, $2, $3, $4 }'
+	sed -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' "$MACOS_DEFAULTS" | grep -v '^$' || true
 }
 
 # macos_value <type> <value>: The value in one form, so `defaults read`'s 1 matches a bool's true
@@ -1130,14 +1131,30 @@ macos_value() {
 setup_macos_defaults() {
 	is_macos && [ -f "$MACOS_DEFAULTS" ] || return 0
 	echo "macOS settings (config/macos/defaults):"
-	local domain key type value current differing=() entry restore
-	while read -r domain key type value; do
+	local line domain key type value current total=0 i restore
+	# The settings that differ: each one's line, and what this Mac has now (empty: not set)
+	local differing=() currents=()
+	while IFS= read -r line; do
+		read -r domain key type value <<<"$line"
+		case "$type" in
+			bool | int | float | string) ;;
+			*)
+				note "skipped \"$line\" in config/macos/defaults - it should be <domain> <key> <bool|int|float|string> <value>"
+				continue
+				;;
+		esac
+		if [ -z "$value" ]; then
+			note "skipped \"$line\" in config/macos/defaults - it has no value"
+			continue
+		fi
+		total=$((total + 1))
 		current="$(defaults read "$domain" "$key" 2>/dev/null || true)"
 		[ "$(macos_value "$type" "$current")" = "$(macos_value "$type" "$value")" ] && continue
-		differing+=("$domain $key $type $value $current")
+		differing+=("$line")
+		currents+=("$current")
 	done < <(macos_entries)
 	if [ ${#differing[@]} -eq 0 ]; then
-		echo "  All $(macos_entries | wc -l | tr -d ' ') match"
+		echo "  All $total match"
 		return
 	fi
 	if [ "$MODE" = check ]; then
@@ -1145,9 +1162,9 @@ setup_macos_defaults() {
 	else
 		echo "  ${#differing[@]} differ from config/macos/defaults:"
 	fi
-	for entry in "${differing[@]}"; do
-		read -r domain key type value current <<<"$entry"
-		detail "$domain $key: ${current:-not set} -> $value"
+	for i in "${!differing[@]}"; do
+		read -r domain key type value <<<"${differing[$i]}"
+		detail "$domain $key: ${currents[$i]:-not set} -> $value"
 	done
 	[ "$MODE" = check ] && return
 	if ! can_ask; then
@@ -1162,12 +1179,13 @@ setup_macos_defaults() {
 	mkdir -p "$BACKUP_DIR"
 	ensure_backups_ignored
 	printf '#!/usr/bin/env bash\n# Puts back the macOS settings install.sh changed on %s\n' "$TIMESTAMP" > "$restore"
-	for entry in "${differing[@]}"; do
-		read -r domain key type value current <<<"$entry"
+	for i in "${!differing[@]}"; do
+		read -r domain key type value <<<"${differing[$i]}"
+		current="${currents[$i]}"
 		if [ -z "$current" ]; then
-			printf 'defaults delete %s %s\n' "$domain" "$key" >> "$restore"
+			printf 'defaults delete %q %q\n' "$domain" "$key" >> "$restore"
 		else
-			printf 'defaults write %s %s -%s %s\n' "$domain" "$key" "$type" "$(macos_value "$type" "$current")" >> "$restore"
+			printf 'defaults write %q %q -%s %q\n' "$domain" "$key" "$type" "$(macos_value "$type" "$current")" >> "$restore"
 		fi
 		defaults write "$domain" "$key" "-$type" "$value"
 	done

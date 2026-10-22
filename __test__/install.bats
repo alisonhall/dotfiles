@@ -1119,8 +1119,30 @@ macos_defaults() {
 	[ -z "$(ls "$FAKE_DEFAULTS/store")" ]
 }
 
-@test "macOS settings: does nothing on other systems" {
-	call setup_macos_defaults
+@test "macOS settings: values can have spaces, and lines that aren't settings are skipped with a note" {
+	fake_defaults
+	printf '%s\n' 'com.example.app Greeting string Hello there' 'com.example.app Broken' > "$MACOS_DEFAULTS_FILE"
+	echo old > "$FAKE_DEFAULTS/store/com.example.app.Greeting"
+	macos_defaults y
 	[ "$status" -eq 0 ]
-	if [ "$(uname -s)" != Darwin ]; then [ -z "$output" ]; fi
+	[[ "$output" == *'skipped "com.example.app Broken"'* ]] || false
+	[ "$(cat "$FAKE_DEFAULTS/store/com.example.app.Greeting")" = "Hello there" ]
+	echo "old value" > "$FAKE_DEFAULTS/store/com.example.app.Greeting"
+	macos_defaults y
+	bash "$(find "$BATS_TEST_TMPDIR/backups" -name macos-defaults-restore.sh)"
+	[ "$(cat "$FAKE_DEFAULTS/store/com.example.app.Greeting")" = "old value" ]
+}
+
+@test "macOS settings: does nothing on other systems" {
+	# Never the real `defaults`, and never this Mac's real settings - tests run from a terminal
+	# could otherwise ask, and apply them
+	run bash -c '
+		script="$1"; shift
+		source "$script"
+		is_macos() { return 1; }
+		defaults() { echo "defaults was run"; }
+		setup_macos_defaults
+	' bats-call "$REPO/install.sh"
+	[ "$status" -eq 0 ]
+	[ -z "$output" ]
 }
