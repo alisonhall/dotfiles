@@ -136,7 +136,7 @@ needs_symlinks() {
 	call ensure_block "$HOME/.zshrc" "NEW"
 	[[ "$output" == *"Updated the dotfiles block"* ]] || false
 	[ "$(cat "$HOME/.zshrc")" = "$(printf 'before\n%s\nNEW\n%s\nafter' "$START" "$END")" ]
-	grep -qx OLD "$HOME"/.zshrc.bak.*
+	grep -qx OLD "$LOCAL_DIR"/backups/*/HOME/.zshrc
 }
 
 @test "ensure_block: refuses a file with two blocks and leaves it unchanged" {
@@ -350,7 +350,8 @@ needs_symlinks() {
 	[ "$(git config --file "$HOME/.gitconfig" --list | head -n 1)" = "include.path=$SHARED_INCLUDE" ]
 	# --includes: user.email moved into $LOCAL_DIR/gitconfig, which --global alone doesn't expand
 	[ "$(git config --global --includes user.email)" = "me@example.com" ]
-	ls "$HOME"/.gitconfig.bak.*
+	ls "$LOCAL_DIR"/backups/*/HOME/.gitconfig
+	run ! ls "$HOME"/.gitconfig.bak.*
 }
 
 @test "setup_git: a second run changes nothing" {
@@ -582,7 +583,8 @@ needs_symlinks() {
 	printf 'same\n' > "$HOME/.npmrc"
 	call link_local_file npmrc .npmrc
 	[ "$(readlink "$HOME/.npmrc")" = "$LOCAL_DIR/npmrc" ]
-	ls "$HOME"/.npmrc.bak.*
+	ls "$LOCAL_DIR"/backups/*/HOME/.npmrc
+	run ! ls "$HOME"/.npmrc.bak.*
 }
 
 @test "link_local_file: a different ~/.npmrc gets a warning, and both files are left alone" {
@@ -819,4 +821,77 @@ private_repo_local() {
 	printf '[user]\n\temail = me@example.com\n' > "$LOCAL_DIR/gitconfig"
 	MODE_FLAG=--check call check_gitconfig
 	[[ "$output" != *"also sets"* ]] || false
+}
+
+#   -------------------------------
+#   Backups (local/backups/<run>/)
+#   -------------------------------
+
+@test "backup: copies a file under its original path into this run's folder, and keeps the first copy" {
+	printf 'first\n' > "$HOME/.zshrc"
+	call eval 'backup "$HOME/.zshrc"; printf "second\n" > "$HOME/.zshrc"; backup "$HOME/.zshrc"; echo "DIR=$BACKUP_DIR"'
+	[ "$status" -eq 0 ]
+	dir="$(printf '%s\n' "$output" | sed -n 's/^DIR=//p')"
+	[[ "$dir" == "$LOCAL_DIR/backups/"* ]] || false
+	[ "$(cat "$dir/HOME/.zshrc")" = first ]    # The state before the run
+	[ "$(cat "$HOME/.zshrc")" = second ]
+}
+
+@test "backup --move: moves a file (or a link) there, without overwriting an earlier one" {
+	printf 'a\n' > "$HOME/.npmrc"
+	call eval 'backup "$HOME/.npmrc" --move; printf "b\n" > "$HOME/.npmrc"; backup "$HOME/.npmrc" --move'
+	[ ! -e "$HOME/.npmrc" ]
+	first="$(printf '%s\n' "$output" | head -n 1)"
+	second="$(printf '%s\n' "$output" | tail -n 1)"
+	[ "$(cat "$first")" = a ]
+	[ "$(cat "$second")" = b ]
+}
+
+@test "backup: files inside local/ go under local/, others under other/" {
+	mkdir -p "$LOCAL_DIR"
+	printf 'x\n' > "$LOCAL_DIR/shell_local.sh"
+	printf 'y\n' > "$BATS_TEST_TMPDIR/elsewhere"
+	call eval 'backup "$LOCAL_DIR/shell_local.sh"; backup "$BATS_TEST_TMPDIR/elsewhere"'
+	[[ "$output" == *"/backups/"*"/local/shell_local.sh"* ]] || false
+	[[ "$output" == *"/backups/"*"/other$BATS_TEST_TMPDIR/elsewhere"* ]] || false
+}
+
+@test "backups: ignored in a local/ that install.sh created (via its .gitignore)" {
+	call setup_local_dir
+	printf 'old\n' > "$HOME/.zshrc"
+	call eval 'backup "$HOME/.zshrc" >/dev/null'
+	git -C "$LOCAL_DIR" check-ignore -q backups/anything
+	[ -z "$(git -C "$LOCAL_DIR" status --porcelain)" ]
+	run ! grep -q backups "$LOCAL_DIR/.git/info/exclude"
+}
+
+@test "backups: ignored in your own private repo via .git/info/exclude - its .gitignore isn't touched" {
+	private_repo_local
+	before="$(cksum < "$LOCAL_DIR/.gitignore")"
+	printf 'old\n' > "$HOME/.zshrc"
+	call eval 'backup "$HOME/.zshrc" >/dev/null; backup "$HOME/.zshrc" >/dev/null'
+	git -C "$LOCAL_DIR" check-ignore -q backups/anything
+	[ "$(cksum < "$LOCAL_DIR/.gitignore")" = "$before" ]
+	[ "$(grep -c '^backups/$' "$LOCAL_DIR/.git/info/exclude")" -eq 1 ]
+	[ -z "$(git -C "$LOCAL_DIR" status --porcelain)" ]
+}
+
+@test "backups: local/install.sh is told this run's backup folder" {
+	mkdir -p "$LOCAL_DIR"
+	printf '#!/usr/bin/env bash\necho "BACKUPS=$DOTFILES_BACKUP_DIR"\n' > "$LOCAL_DIR/install.sh"
+	call eval 'run_local_install; echo "MINE=$BACKUP_DIR"'
+	theirs="$(printf '%s\n' "$output" | sed -n 's/^BACKUPS=//p')"
+	mine="$(printf '%s\n' "$output" | sed -n 's/^MINE=//p')"
+	[ -n "$mine" ]
+	[ "$theirs" = "$mine" ]
+}
+
+@test "backups: nothing is left behind in the home folder" {
+	printf '[user]\n\temail = me@example.com\n' > "$HOME/.gitconfig"
+	printf 'echo mine\n%s\nOLD\n%s\n' "# >>> dotfiles >>>" "# <<< dotfiles <<<" > "$HOME/.zshrc"
+	call eval 'setup_local_dir; ensure_block "$HOME/.zshrc" NEW; setup_git'
+	[ "$status" -eq 0 ]
+	run ! ls -d "$HOME"/.*.bak.* "$HOME"/*.bak.*
+	[ -f "$(ls -d "$LOCAL_DIR"/backups/*/HOME/.zshrc)" ]
+	[ -f "$(ls -d "$LOCAL_DIR"/backups/*/HOME/.gitconfig)" ]
 }

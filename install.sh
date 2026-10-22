@@ -8,8 +8,9 @@
 #
 # Safe to re-run: every step checks whether it has already been done.
 # Existing files are added to, never replaced. Anything that's a symlink
-# (e.g. into an old dotfiles repo) is moved aside to <file>.bak.<timestamp>
-# first so nothing gets written through it.
+# (e.g. into an old dotfiles repo) is moved aside first so nothing gets
+# written through it. Anything changed or moved is backed up first, to
+# local/backups/<date and time of the run>/ (never committed).
 #
 # Set DOTFILES_SKIP_GITLEAKS=1 to skip installing gitleaks (e.g. in CI).
 # Set DOTFILES_SKIP_P10K=1 to skip installing powerlevel10k and its font.
@@ -28,6 +29,10 @@ LOCAL_DIR="${DOTFILES_LOCAL_DIR:-$DOTFILES/local}"
 MARKER_START="# >>> dotfiles >>>"
 MARKER_END="# <<< dotfiles <<<"
 TIMESTAMP="$(date +%Y%m%d%H%M%S)"
+# One folder per run for backups of anything install.sh changes or moves (see backup). Exported so
+# $LOCAL_DIR/install.sh, which this runs, puts its backups in the same folder.
+BACKUP_DIR="${DOTFILES_BACKUP_DIR:-$LOCAL_DIR/backups/$TIMESTAMP}"
+export DOTFILES_BACKUP_DIR="$BACKUP_DIR"
 
 MODE=install
 IS_GIT_CLONE=1
@@ -71,11 +76,52 @@ git_version_at_least() {
 	[ "$major" -gt "$1" ] || { [ "$major" -eq "$1" ] && [ "$minor" -ge "$2" ]; }
 }
 
+# backup_path <file>: Where this run backs <file> up to - under its original path, below HOME/ or
+# local/ (or other/, for anywhere else)
+backup_path() {
+	case "$1" in
+		"$LOCAL_DIR"/*) echo "$BACKUP_DIR/local/${1#"$LOCAL_DIR"/}" ;;
+		"$HOME"/*) echo "$BACKUP_DIR/HOME/${1#"$HOME"/}" ;;
+		*) echo "$BACKUP_DIR/other$1" ;;
+	esac
+}
+
+# backup <file> [--move]: Copies (or moves) <file> into this run's backup folder, and prints where it
+# went. A file backed up twice in one run keeps its first backup - the state before the run.
+backup() {
+	local dest n=2
+	dest="$(backup_path "$1")"
+	mkdir -p "$(dirname "$dest")"
+	ensure_backups_ignored
+	if [ "${2:-}" = --move ]; then
+		while [ -e "$dest" ] || [ -L "$dest" ]; do
+			dest="$(backup_path "$1").$n"
+			n=$((n + 1))
+		done
+		mv "$1" "$dest"
+	elif [ ! -e "$dest" ]; then
+		cp -p "$1" "$dest"
+	fi
+	echo "$dest"
+}
+
+# ensure_backups_ignored: Keeps $LOCAL_DIR/backups/ out of git. When $LOCAL_DIR is a repo whose
+# .gitignore doesn't already cover it (e.g. your own private repo), it goes in .git/info/exclude,
+# which isn't committed - so your .gitignore is never touched.
+ensure_backups_ignored() {
+	[ -z "${BACKUPS_IGNORED:-}" ] || return 0
+	BACKUPS_IGNORED=1
+	[ -d "$LOCAL_DIR/.git" ] || return 0
+	git -C "$LOCAL_DIR" check-ignore -q backups/x 2>/dev/null && return 0
+	mkdir -p "$LOCAL_DIR/.git/info"
+	printf '\n# Backups from install.sh (this machine only - never committed)\nbackups/\n' >> "$LOCAL_DIR/.git/info/exclude"
+}
+
 move_aside_if_symlink() {
-	local file="$1"
+	local file="$1" dest
 	if [ -L "$file" ]; then
-		mv "$file" "$file.bak.$TIMESTAMP"
-		echo "  Moved symlink $file to $file.bak.$TIMESTAMP"
+		dest="$(backup "$file" --move)"
+		echo "  Moved symlink $file to $dest"
 	fi
 }
 
@@ -137,12 +183,14 @@ ensure_block() {
 
 	local old_location
 	old_location="$(printf '%s\n' "$current" | sed -n 's/^export DOTFILES="\(.*\)"$/\1/p')"
-	cp "$file" "$file.bak.$TIMESTAMP"
-	DOTFILES_BLOCK="$contents" awk -v start="$MARKER_START" -v end="$MARKER_END" '
+	local saved updated
+	saved="$(backup "$file")"
+	updated="$(DOTFILES_BLOCK="$contents" awk -v start="$MARKER_START" -v end="$MARKER_END" '
 		$0 == start { print; print ENVIRON["DOTFILES_BLOCK"]; skip = 1; next }
 		$0 == end { skip = 0 }
-		!skip' "$file.bak.$TIMESTAMP" > "$file"
-	echo "  Updated the dotfiles block in $file (it was out of date; old version in $file.bak.$TIMESTAMP)"
+		!skip' "$file")"
+	printf '%s\n' "$updated" > "$file"
+	echo "  Updated the dotfiles block in $file (it was out of date; old version in $saved)"
 	if [ -n "$old_location" ] && [ "$old_location" != "$DOTFILES" ]; then
 		detail "It loaded the dotfiles from $old_location - now $DOTFILES"
 	fi
@@ -370,7 +418,7 @@ link_local_file() {
 			local_changed "$local_file"
 			echo "  Moved ~/$2 to $local_file"
 		elif cmp -s "$home_file" "$local_file"; then
-			mv "$home_file" "$home_file.bak.$TIMESTAMP"
+			backup "$home_file" --move >/dev/null
 		else
 			warning "~/$2 and $local_file are different files. ~/$2 is the one in use - merge what you need into $local_file, delete ~/$2, and re-run install.sh to link it"
 			return 0
@@ -408,14 +456,16 @@ ensure_secrets_sourced() {
 	local shell_local="$LOCAL_DIR/shell_local.sh"
 	[ -f "$shell_local" ] || return 0
 	grep -qxF "$SECRETS_SOURCE_LINE" "$shell_local" && return 0
-	cp "$shell_local" "$shell_local.bak.$TIMESTAMP"
+	local saved existing
+	saved="$(backup "$shell_local")"
+	existing="$(cat "$shell_local")"
 	{
 		printf '# Secrets (API tokens, credentials) live in secrets.sh instead, so they never need to pass\n'
 		printf "# this folder's pre-commit hook. Sourced first, so the rest of this file can use them.\n"
 		printf '%s\n\n' "$SECRETS_SOURCE_LINE"
-		cat "$shell_local.bak.$TIMESTAMP"
+		printf '%s\n' "$existing"
 	} > "$shell_local"
-	echo "  Added a line to $shell_local that sources $LOCAL_DIR/secrets.sh"
+	echo "  Added a line to $shell_local that sources $LOCAL_DIR/secrets.sh (old version in $saved)"
 	local_changed "$shell_local"
 }
 
@@ -434,7 +484,7 @@ setup_local_dir() {
 	# Created either way, even if the git-repo question above was declined, so the folder is ready
 	# to become a repo later with nothing to fill in by hand.
 	if [ ! -f "$LOCAL_DIR/.gitignore" ]; then
-		printf '.DS_Store\n*.bak.*\nsecrets.sh\n' > "$LOCAL_DIR/.gitignore"
+		printf '.DS_Store\n*.bak.*\nsecrets.sh\nbackups/\n' > "$LOCAL_DIR/.gitignore"
 		local_changed .gitignore
 	elif ! grep -qxF secrets.sh "$LOCAL_DIR/.gitignore"; then
 		printf 'secrets.sh\n' >> "$LOCAL_DIR/.gitignore"
@@ -845,8 +895,7 @@ shared_include_first() {
 prepend_shared_include() {
 	local gitconfig="$1" include_path="$2"
 	if [ -s "$gitconfig" ]; then
-		cp "$gitconfig" "$gitconfig.bak.$TIMESTAMP"
-		echo "  Backed up $gitconfig to $gitconfig.bak.$TIMESTAMP"
+		echo "  Backed up $gitconfig to $(backup "$gitconfig")"
 	fi
 	if [ "${3:-}" = --move ]; then
 		git_unset_include "$include_path"
@@ -880,7 +929,7 @@ setup_local_gitconfig() {
 			ask_yes_no "  Move $gitconfig's personal settings into $local_gitconfig, so they're versioned with everything else there?" y; then
 			mv "$gitconfig.tmp-local" "$local_gitconfig"
 			local_changed "$local_gitconfig"
-			cp "$gitconfig" "$gitconfig.local-migration.bak.$TIMESTAMP"
+			backup "$gitconfig" >/dev/null
 			# Everything but the shared include was just moved out, so replace the whole file with
 			# a fresh copy of just that - rather than try to subtract it back out of $gitconfig,
 			# which would leave duplicates of anything not exactly matching the include removal.
