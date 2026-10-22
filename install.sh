@@ -611,8 +611,12 @@ setup_local_hooks() {
 status=0
 
 # 1. Secrets (API keys, tokens, passwords) - https://github.com/gitleaks/gitleaks
-# install.sh may have put it in ~/.local/bin, which GUI git clients don't have on PATH
-PATH="$PATH:$HOME/.local/bin"
+# Where install.sh may have put it, which GUI git clients (e.g. VS Code) may not have on PATH:
+# ~/.local/bin, Homebrew's folder, or winget's
+PATH="$PATH:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin" # path-check: ignore (missing folders are skipped)
+if [ -n "${LOCALAPPDATA:-}" ] && command -v cygpath >/dev/null 2>&1; then
+	PATH="$PATH:$(cygpath -u "$LOCALAPPDATA")/Microsoft/WinGet/Links"
+fi
 if [ -n "${SKIP_GITLEAKS:-}" ]; then
 	:
 elif ! command -v gitleaks >/dev/null 2>&1; then
@@ -1156,6 +1160,7 @@ download_gitleaks() {
 	return $result
 }
 
+# (Only where the pre-commit hooks look for it too - see their PATH line)
 has_gitleaks() {
 	command -v gitleaks >/dev/null 2>&1 || [ -x "$HOME/.local/bin/gitleaks" ] || [ -x "$HOME/.local/bin/gitleaks.exe" ]
 }
