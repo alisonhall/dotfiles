@@ -515,10 +515,6 @@
   added = yellow
   changed = green
   untracked = cyan
-[pull] # How to reconcile divergent branches when pulling:
-  rebase = false # merge (the default strategy)
-  # rebase = true # rebase
-  # ff = only # fast-forward only
 [filter "lfs"]
 	required = true
 	clean = git-lfs clean -- %f
