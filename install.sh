@@ -14,6 +14,7 @@
 #
 # Set DOTFILES_SKIP_GITLEAKS=1 to skip installing gitleaks (e.g. in CI).
 # Set DOTFILES_SKIP_P10K=1 to skip installing powerlevel10k and its font.
+# Set DOTFILES_SKIP_OH_MY_ZSH=1 to skip installing oh-my-zsh and zsh-completions.
 
 # Re-run with bash if started some other way (e.g. `sh install.sh` or `zsh install.sh`)
 if [ -z "${BASH_VERSION:-}" ]; then
@@ -863,9 +864,45 @@ install_meslo_font() {
 	fi
 }
 
+# oh-my-zsh: shell/zshrc.sh loads it (and its git, npm, docker... plugins) if ~/.oh-my-zsh exists.
+# Cloned rather than installed with its own installer, which would replace ~/.zshrc.
+has_oh_my_zsh() { [ -f "$HOME/.oh-my-zsh/oh-my-zsh.sh" ]; }
+
+install_oh_my_zsh() {
+	if has_oh_my_zsh; then
+		echo "  oh-my-zsh is installed"
+	elif [ -n "${DOTFILES_SKIP_OH_MY_ZSH:-}" ]; then
+		echo "  Skipping oh-my-zsh install (DOTFILES_SKIP_OH_MY_ZSH is set)"
+	elif [ -e "$HOME/.oh-my-zsh" ]; then
+		note "$(show_path "$HOME/.oh-my-zsh") exists but isn't oh-my-zsh, so it wasn't installed. Move it aside, then re-run install.sh"
+	elif command -v git >/dev/null 2>&1 &&
+		git clone --depth=1 -q https://github.com/ohmyzsh/ohmyzsh.git "$HOME/.oh-my-zsh" >/dev/null 2>&1; then
+		echo "  Installed oh-my-zsh to ~/.oh-my-zsh"
+	else
+		note "couldn't install oh-my-zsh. zsh works without it, but without its plugins (git, npm, docker...):"
+		detail "https://ohmyz.sh/#install"
+	fi
+}
+
+# zsh-completions: extra completions shell/zshrc.sh adds where there's Homebrew
+install_zsh_completions() {
+	command -v brew >/dev/null 2>&1 || return 0
+	if [ -d "$(brew --prefix)/share/zsh-completions" ]; then
+		echo "  zsh-completions is installed"
+	elif [ -n "${DOTFILES_SKIP_OH_MY_ZSH:-}" ]; then
+		echo "  Skipping zsh-completions install (DOTFILES_SKIP_OH_MY_ZSH is set)"
+	elif brew install zsh-completions >/dev/null 2>&1; then
+		echo "  Installed zsh-completions with Homebrew"
+	else
+		note "couldn't install zsh-completions (brew install zsh-completions) - zsh just has fewer completions without it"
+	fi
+}
+
 setup_zsh_prompt() {
 	zsh_available || return 0
-	echo "Zsh prompt:"
+	echo "Zsh (oh-my-zsh and prompt):"
+	install_oh_my_zsh
+	install_zsh_completions
 	install_powerlevel10k
 	install_meslo_font
 }
@@ -1061,6 +1098,83 @@ setup_iterm() {
 	defaults write com.googlecode.iterm2 PrefsCustomFolder -string "$DOTFILES/config/iterm"
 	defaults write com.googlecode.iterm2 LoadPrefsFromCustomFolder -bool true
 	echo "  iTerm will load settings from config/iterm (restart iTerm to apply)"
+}
+
+#   -------------------------------
+#   MACOS SETTINGS
+#   -------------------------------
+
+# config/macos/defaults: Dock, Finder, trackpad... settings, applied with `defaults write` after
+# asking. Only the ones that differ are changed, and the old values are saved as a script that
+# puts them back, in this run's backups folder.
+MACOS_DEFAULTS="$DOTFILES/config/macos/defaults"
+
+is_macos() { [ "$(uname -s)" = Darwin ]; }
+# Whether there's someone to ask (tests replace this). Without one, settings are reported, not applied.
+can_ask() { [ -t 0 ]; }
+
+# macos_entries: config/macos/defaults as "<domain> <key> <type> <value>" lines, without comments
+macos_entries() {
+	sed -e 's/#.*//' "$MACOS_DEFAULTS" | awk 'NF == 4 { print $1, $2, $3, $4 }'
+}
+
+# macos_value <type> <value>: The value in one form, so `defaults read`'s 1 matches a bool's true
+macos_value() {
+	case "$1:$2" in
+		bool:1 | bool:[Tt][Rr][Uu][Ee] | bool:[Yy][Ee][Ss]) echo true ;;
+		bool:0 | bool:[Ff][Aa][Ll][Ss][Ee] | bool:[Nn][Oo]) echo false ;;
+		*) echo "$2" ;;
+	esac
+}
+
+setup_macos_defaults() {
+	is_macos && [ -f "$MACOS_DEFAULTS" ] || return 0
+	echo "macOS settings (config/macos/defaults):"
+	local domain key type value current differing=() entry restore
+	while read -r domain key type value; do
+		current="$(defaults read "$domain" "$key" 2>/dev/null || true)"
+		[ "$(macos_value "$type" "$current")" = "$(macos_value "$type" "$value")" ] && continue
+		differing+=("$domain $key $type $value $current")
+	done < <(macos_entries)
+	if [ ${#differing[@]} -eq 0 ]; then
+		echo "  All $(macos_entries | wc -l | tr -d ' ') match"
+		return
+	fi
+	if [ "$MODE" = check ]; then
+		note "${#differing[@]} differ from config/macos/defaults - run install.sh to apply them:"
+	else
+		echo "  ${#differing[@]} differ from config/macos/defaults:"
+	fi
+	for entry in "${differing[@]}"; do
+		read -r domain key type value current <<<"$entry"
+		detail "$domain $key: ${current:-not set} -> $value"
+	done
+	[ "$MODE" = check ] && return
+	if ! can_ask; then
+		note "not applied without someone to ask - run install.sh in a terminal to apply them"
+		return
+	fi
+	if ! ask_yes_no "  Apply them?" y; then
+		echo "  Left as they are"
+		return
+	fi
+	restore="$BACKUP_DIR/macos-defaults-restore.sh"
+	mkdir -p "$BACKUP_DIR"
+	ensure_backups_ignored
+	printf '#!/usr/bin/env bash\n# Puts back the macOS settings install.sh changed on %s\n' "$TIMESTAMP" > "$restore"
+	for entry in "${differing[@]}"; do
+		read -r domain key type value current <<<"$entry"
+		if [ -z "$current" ]; then
+			printf 'defaults delete %s %s\n' "$domain" "$key" >> "$restore"
+		else
+			printf 'defaults write %s %s -%s %s\n' "$domain" "$key" "$type" "$(macos_value "$type" "$current")" >> "$restore"
+		fi
+		defaults write "$domain" "$key" "-$type" "$value"
+	done
+	echo "  Applied ${#differing[@]} macOS setting(s). To undo: bash $(show_path "$restore")"
+	# The Dock and Finder pick their settings up when they restart; some others need a new login
+	killall Dock Finder SystemUIServer >/dev/null 2>&1 || true
+	echo "  Some (like scrolling and tap to click) take effect after you log out and back in"
 }
 
 #   -------------------------------
@@ -1484,6 +1598,7 @@ main() {
 		run_local_install
 		setup_local_links
 		setup_iterm
+		setup_macos_defaults
 		setup_vscode
 		setup_repo_hooks
 	fi
@@ -1493,6 +1608,7 @@ main() {
 	check_gitconfig
 	[ "$MODE" = check ] && run_local_install --check
 	[ "$MODE" = check ] && setup_vscode
+	[ "$MODE" = check ] && setup_macos_defaults
 	check_new_shells
 	check_reminders
 

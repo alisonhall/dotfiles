@@ -39,6 +39,8 @@ The installer doesn't replace your existing config files. Anything it does chang
 - creates `local/` (see below), asking first whether to set it up as its own git repo (defaulting to yes), and creates `local/shell_local.sh` from [local.example.sh](local.example.sh) if there's nothing to move yet
 - moves an existing `~/.shell_local` and `~/.dotfiles_blocklist` into `local/` automatically; asks first before moving an existing `~/.p10k.zsh` or the settings below the include in `~/.gitconfig` (defaulting to yes). Say no (or just leave the file where it is) and everything keeps working from its original location - see [Local setup](#local-setup)
 - on macOS, points iTerm at `config/iterm` for its settings
+- on macOS, applies the settings in `config/macos/defaults` (Dock, Finder, trackpad...) that differ, after listing them and asking - see [macOS settings](#macos-settings)
+- for zsh, installs oh-my-zsh (cloned to `~/.oh-my-zsh`; `shell/zshrc.sh` loads it and its plugins) and, where there's Homebrew, zsh-completions, plus powerlevel10k and its font for the prompt
 - adds the settings VS Code needs (e.g. the terminal font for the prompt's icons) to VS Code's user settings, if they're missing - see [VS Code](#vs-code)
 - installs gitleaks if it's missing (see [Committing](#committing))
 - before changing anything, stops if it's run as root, git is missing, or the repo's shell files have syntax errors or Windows line endings
@@ -54,6 +56,7 @@ The installer doesn't replace your existing config files. Anything it does chang
 | npm/yarn | | `local/npmrc` (linked from `~/.npmrc`), if this machine needs a custom registry - most don't |
 | Maven | | `local/m2-settings.xml` (linked from `~/.m2/settings.xml`), if this machine needs one - most don't |
 | iTerm (macOS) | `config/iterm/` | |
+| macOS settings | `config/macos/defaults` | |
 | VS Code | `config/vscode/` (not applied automatically - see below) | |
 | Scripts | `bin/` (added to `PATH`) | |
 
@@ -115,6 +118,12 @@ Unlike the shell and git config, `config/vscode/` isn't linked in automatically 
 To use them, copy or symlink `config/vscode/settings.json` to VS Code's user `settings.json` (`code --locate-shell-integration-path` or Cmd+Shift+P → "Preferences: Open User Settings (JSON)" shows the path), and `config/vscode/global.code-snippets` into the same folder's `snippets/`. Merge rather than overwrite if you already have machine- or work-specific settings there.
 
 **Settings `install.sh` adds:** a few settings VS Code needs for the dotfiles to look right are added to VS Code's own user settings by `install.sh`, if they're missing (the list is `VSCODE_SETTINGS` in `install.sh`). Anything you've already set - even to a different value - is left as it is and noted, the rest of the file isn't touched, and it's backed up first. It only does this where VS Code has been used (its settings folder exists); `install.sh --check` notes what's missing. For now the list is just the terminal font: the zsh prompt's icons need an icon font, but VS Code's terminal doesn't use iTerm's settings, so `install.sh` sets `"terminal.integrated.fontFamily": "MesloLGS NF"` - the font it installs for the prompt, and the one `config/iterm` uses.
+
+## macOS settings
+
+`config/macos/defaults` lists Dock, Finder, trackpad and other settings, one per line: `<domain> <key> <type> <value>`, the arguments to `defaults write`. On macOS, `install.sh` lists the ones this Mac has set differently and asks before applying them; `install.sh --check` only lists them. The old values are saved as a script that puts them back, in that run's backups folder (`local/backups/<date and time>/macos-defaults-restore.sh`). Without a terminal to ask in (e.g. in CI), nothing is changed.
+
+To add one, find its domain and key by comparing `defaults read <domain>` before and after changing it in System Settings. Some (like scrolling direction and tap to click) only take effect after logging out and back in.
 
 ## Scripts
 

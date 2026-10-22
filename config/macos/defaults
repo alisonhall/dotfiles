@@ -1,0 +1,27 @@
+# macOS settings install.sh applies (asking first), one per line:
+#   <domain> <key> <bool|int|float|string> <value>   # optional comment
+# Find a setting's domain and key by comparing `defaults read <domain>` before and after changing
+# it in System Settings. Some only take effect after logging out and back in.
+
+# --- Dock ---
+com.apple.dock orientation string left
+com.apple.dock tilesize int 33
+com.apple.dock autohide bool false
+com.apple.dock mru-spaces bool false            # Don't rearrange Spaces by most recent use
+com.apple.dock wvous-tl-corner int 10           # Top-left hot corner: put the display to sleep
+com.apple.dock wvous-tl-modifier int 0
+
+# --- Finder ---
+com.apple.finder AppleShowAllFiles bool true    # Show hidden files
+com.apple.finder ShowPathbar bool true
+com.apple.finder ShowStatusBar bool true
+com.apple.finder _FXSortFoldersFirst bool true
+
+# --- Everywhere ---
+NSGlobalDomain AppleInterfaceStyle string Dark
+NSGlobalDomain AppleShowAllExtensions bool true
+NSGlobalDomain com.apple.swipescrolldirection bool false    # Natural scrolling off
+
+# --- Trackpad: tap to click (built-in and Bluetooth) ---
+com.apple.AppleMultitouchTrackpad Clicking bool true
+com.apple.driver.AppleBluetoothMultitouch.trackpad Clicking bool true

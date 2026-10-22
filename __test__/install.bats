@@ -1005,3 +1005,122 @@ json.loads(re.sub(r",(\s*[}\]])", r"\1", text))' "$1"
 	[[ "$output" == *"NOTE: VS Code's settings don't set terminal.integrated.fontFamily"* ]] || false
 	[ "$(cksum < "$VSCODE_DIR/settings.json")" = "$before" ]
 }
+
+#   -------------------------------
+#   oh-my-zsh
+#   -------------------------------
+
+@test "install_oh_my_zsh: leaves an existing oh-my-zsh alone" {
+	mkdir -p "$HOME/.oh-my-zsh"
+	touch "$HOME/.oh-my-zsh/oh-my-zsh.sh"
+	call install_oh_my_zsh
+	[ "$status" -eq 0 ]
+	[ "$output" = "  oh-my-zsh is installed" ]
+}
+
+@test "install_oh_my_zsh: doesn't clone over a ~/.oh-my-zsh that isn't oh-my-zsh" {
+	mkdir -p "$HOME/.oh-my-zsh"
+	echo mine > "$HOME/.oh-my-zsh/notes.txt"
+	call install_oh_my_zsh
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"exists but isn't oh-my-zsh"* ]] || false
+	[ "$(ls "$HOME/.oh-my-zsh")" = notes.txt ]
+}
+
+@test "install_oh_my_zsh: DOTFILES_SKIP_OH_MY_ZSH skips it" {
+	DOTFILES_SKIP_OH_MY_ZSH=1 call install_oh_my_zsh
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"Skipping oh-my-zsh install"* ]] || false
+	[ ! -e "$HOME/.oh-my-zsh" ]
+}
+
+#   -------------------------------
+#   macOS settings
+#   -------------------------------
+
+# fake_defaults: A fake `defaults` command (first on PATH) that keeps each setting in a file, and
+# reads bools back as 1/0 like the real one. Plus a small config/macos/defaults to apply.
+fake_defaults() {
+	FAKE_DEFAULTS="$BATS_TEST_TMPDIR/fake defaults"
+	export FAKE_DEFAULTS
+	mkdir -p "$FAKE_DEFAULTS/bin" "$FAKE_DEFAULTS/store"
+	cat > "$FAKE_DEFAULTS/bin/defaults" <<'FAKE'
+#!/usr/bin/env bash
+file="$FAKE_DEFAULTS/store/$2.$3"
+case "$1" in
+	read) [ -f "$file" ] && cat "$file" ;;
+	write)
+		case "$4:$5" in
+			-bool:true) echo 1 ;;
+			-bool:false) echo 0 ;;
+			*) echo "$5" ;;
+		esac > "$file"
+		;;
+	delete) rm -f "$file" ;;
+esac
+FAKE
+	printf '#!/usr/bin/env bash\n' > "$FAKE_DEFAULTS/bin/killall"
+	chmod +x "$FAKE_DEFAULTS/bin/defaults" "$FAKE_DEFAULTS/bin/killall"
+	export PATH="$FAKE_DEFAULTS/bin:$PATH"
+	MACOS_DEFAULTS_FILE="$BATS_TEST_TMPDIR/macos-defaults"
+	printf '%s\n' '# A comment' 'com.apple.dock orientation string left    # Dock on the left' \
+		'com.apple.dock autohide bool false' 'NSGlobalDomain AppleShowAllExtensions bool true' > "$MACOS_DEFAULTS_FILE"
+}
+
+# macos_defaults <answer> [--check]: Run setup_macos_defaults as if on a Mac, answering <answer>
+# (empty: no one to ask)
+macos_defaults() {
+	local answer="$1"
+	shift
+	run bash -c '
+		script="$1" file="$2" answer="$3"; shift 3
+		set -- "$@"
+		source "$script"
+		MACOS_DEFAULTS="$file"
+		BACKUP_DIR="$BATS_TEST_TMPDIR/backups"
+		is_macos() { return 0; }
+		if [ -n "$answer" ]; then can_ask() { return 0; }; else can_ask() { return 1; }; fi
+		setup_macos_defaults
+	' bats-call "$REPO/install.sh" "$MACOS_DEFAULTS_FILE" "$answer" "$@" <<<"$answer"
+}
+
+@test "macOS settings: applies the ones that differ after asking, and saves a script that undoes them" {
+	fake_defaults
+	echo right > "$FAKE_DEFAULTS/store/com.apple.dock.orientation"
+	echo 0 > "$FAKE_DEFAULTS/store/com.apple.dock.autohide"    # Already matches (false)
+	macos_defaults y
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"com.apple.dock orientation: right -> left"* ]] || false
+	[[ "$output" == *"NSGlobalDomain AppleShowAllExtensions: not set -> true"* ]] || false
+	[[ "$output" != *"autohide"* ]] || false
+	[[ "$output" == *"Applied 2 macOS setting(s)"* ]] || false
+	[ "$(cat "$FAKE_DEFAULTS/store/com.apple.dock.orientation")" = left ]
+	[ "$(cat "$FAKE_DEFAULTS/store/NSGlobalDomain.AppleShowAllExtensions")" = 1 ]
+
+	# The undo script puts both back
+	bash "$BATS_TEST_TMPDIR/backups/macos-defaults-restore.sh"
+	[ "$(cat "$FAKE_DEFAULTS/store/com.apple.dock.orientation")" = right ]
+	[ ! -e "$FAKE_DEFAULTS/store/NSGlobalDomain.AppleShowAllExtensions" ]
+
+	# Once applied, running it again changes nothing
+	macos_defaults y
+	macos_defaults y
+	[ "$output" = $'macOS settings (config/macos/defaults):\n  All 3 match' ]
+}
+
+@test "macOS settings: answering no, --check, or no one to ask changes nothing" {
+	fake_defaults
+	macos_defaults n
+	[[ "$output" == *"Left as they are"* ]] || false
+	macos_defaults ""
+	[[ "$output" == *"not applied without someone to ask"* ]] || false
+	macos_defaults y --check
+	[[ "$output" == *"NOTE: 3 differ from config/macos/defaults"* ]] || false
+	[ -z "$(ls "$FAKE_DEFAULTS/store")" ]
+}
+
+@test "macOS settings: does nothing on other systems" {
+	call setup_macos_defaults
+	[ "$status" -eq 0 ]
+	if [ "$(uname -s)" != Darwin ]; then [ -z "$output" ]; fi
+}
