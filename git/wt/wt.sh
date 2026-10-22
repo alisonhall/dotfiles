@@ -54,6 +54,16 @@ if [ "$_wt_sourced" = "1" ]; then
         cd "$WT_WORKTREE_REPO_LOCATION/main"
         ;;
       add|cd)
+        # In a subshell - e.g. in the background, because the shell split `wt cd fix-a&b` at the &
+        # and ran `wt cd fix-a &` - the cd at the end couldn't reach the terminal, and the branch is
+        # likely the wrong one, so stop before making anything. (bash and zsh count subshells in
+        # different variables.)
+        if [ "${BASH_SUBSHELL:-${ZSH_SUBSHELL:-0}}" -gt 0 ]; then
+          echo "wt $sub: this ran in the background or a subshell, so it couldn't move your terminal - stopping." >&2
+          echo "  If the branch name has a character like & or ; in it, the shell split the name there." >&2
+          echo "  Run \`wt $sub\` on its own and paste the name when it asks, or put the name in single quotes." >&2
+          return 1
+        fi
         # With no branch, ask for it: a name pasted at the prompt is read as typed, whereas on
         # the command line the shell would act on characters like & or ; before wt saw them
         if [ $# -eq 0 ]; then
@@ -149,6 +159,9 @@ Commands:
                           For add and cd, leave out <branch> to be asked for
                           it: paste a name with characters like & ; ( ) there,
                           or put it in single quotes on the command line.
+                          (In zsh, wt adds the quotes itself. In bash, a name
+                          split at an & runs wt in the background, and wt
+                          stops and says so, rather than using half a name.)
   rm <branch>            Remove a worktree folder and prune stale worktree
                           registrations.
   ls [options]            List every worktree: branch, remote branch (and

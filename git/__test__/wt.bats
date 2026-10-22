@@ -635,6 +635,23 @@ deleted_after_merge() {
 	[ "$(git -C "$WT_WORKTREE_REPO_LOCATION/feature_fix-a&b" rev-parse --abbrev-ref '@{upstream}')" = 'origin/feature/fix-a&b' ]
 }
 
+@test "wt cd split at an unquoted & stops, rather than making the branch before the &" {
+	# What bash does with `wt cd feature/fix-a&b`: runs `wt cd feature/fix-a` in the background
+	run bash -c '. "$1/wt.sh"; wt cd feature/fix-a&b 2>&1; wait' _ "$WT"
+	[[ "$output" == *"wt cd: this ran in the background or a subshell"* ]] || false
+	[[ "$output" == *"paste the name when it asks"* ]] || false
+	[ "$(ls "$WT_WORKTREE_REPO_LOCATION")" = main ]
+	run git -C "$MAIN" show-ref --verify --quiet refs/heads/feature/fix-a
+	[ "$status" -ne 0 ]
+}
+
+@test "zsh's wt stops in the background too" {
+	command -v zsh >/dev/null 2>&1 || skip "zsh isn't installed"
+	run zsh -f -c 'source "$1/wt.sh"; wt add feature/fix-a 2>&1 & wait' _ "$WT"
+	[[ "$output" == *"wt add: this ran in the background or a subshell"* ]] || false
+	[ "$(ls "$WT_WORKTREE_REPO_LOCATION")" = main ]
+}
+
 @test "wt add with no branch asks for one, and stops if none is given" {
 	run bash -c '. "$1/wt.sh" && wt add <<< ""' _ "$WT"
 	[ "$status" -eq 1 ]
