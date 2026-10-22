@@ -73,24 +73,46 @@ teardown() {
 # hold_folder <folder>: On Windows, keep a program in the folder, as an editor or a terminal
 # would, until release_folder. (It has to be a Windows program: Git Bash's own processes don't
 # stop a folder being renamed.)
+#
+# PowerShell is in the folder from the moment it starts, so it says it's ready by creating a file
+# (outside the folder), rather than this checking by renaming the folder away and back: if
+# PowerShell started during the rename, it couldn't start in the folder at all, and never held it.
+# It then stays until release_folder creates another file, however slow the test is (it used to
+# leave after a fixed 2 minutes, which a busy machine could outlast), or for 15 minutes at most.
 hold_folder() {
-	local waited=0
-	(cd "$1" && exec powershell.exe -NoProfile -NonInteractive -Command "Start-Sleep -Seconds 120") >/dev/null 2>&1 3>&- &
+	local ready="$BATS_TEST_TMPDIR/holder-ready" waited=0
+	HOLDER_RELEASE="$BATS_TEST_TMPDIR/holder-release"
+	rm -f "$ready" "$HOLDER_RELEASE"
+	(cd "$1" && WT_HOLDER_READY="$(cygpath -w "$ready")" WT_HOLDER_RELEASE="$(cygpath -w "$HOLDER_RELEASE")" \
+		exec powershell.exe -NoProfile -NonInteractive -Command '
+			New-Item -ItemType File -Path $env:WT_HOLDER_READY | Out-Null
+			$until = (Get-Date).AddMinutes(15)
+			while (-not (Test-Path -LiteralPath $env:WT_HOLDER_RELEASE) -and (Get-Date) -lt $until) {
+				Start-Sleep -Milliseconds 100
+			}') \
+		>/dev/null 2>&1 3>&- &
 	HOLDER=$!
-	# Wait until the folder is in use (PowerShell can take a while to start on a busy machine)
-	while [ "$waited" -lt 30 ]; do
-		mv "$1" "$1.check" 2>/dev/null || return 0
-		mv "$1.check" "$1"
-		sleep 1
+	# PowerShell can take a while to start on a busy machine (tenths of a second each)
+	while [ ! -e "$ready" ] && [ "$waited" -lt 600 ]; do
+		sleep 0.1
 		waited=$((waited + 1))
 	done
-	echo "hold_folder: $1 still isn't in use" >&2
-	return 1
+	if [ ! -e "$ready" ]; then
+		echo "hold_folder: PowerShell didn't start within 60 seconds" >&2
+		return 1
+	fi
+	# (Once, to be sure: a folder that's in use can't be renamed)
+	if mv "$1" "$1.check" 2>/dev/null; then
+		mv "$1.check" "$1"
+		echo "hold_folder: PowerShell started, but $1 still isn't in use" >&2
+		return 1
+	fi
 }
 
 release_folder() {
 	[ -n "${HOLDER:-}" ] || return 0
-	kill "$HOLDER" 2>/dev/null
+	# Let it leave by itself (it checks every tenth of a second), so it's gone before the next step
+	touch "$HOLDER_RELEASE"
 	wait "$HOLDER" 2>/dev/null || true
 	HOLDER=""
 }
