@@ -119,7 +119,10 @@ alias goto-local='cd "$DOTFILES/local"'
 alias open-dotfiles='code "$DOTFILES"'
 alias open-profile='code "$DOTFILES"'
 # open-local: Opens whichever shell_local file is actually in use - local/shell_local.sh, or
-# ~/.shell_local if you'd rather keep it there (e.g. you declined install.sh's offer to move it)
+# ~/.shell_local if you'd rather keep it there (e.g. you declined install.sh's offer to move it).
+# It used to be an alias, which old config (e.g. lines above the dotfiles block in ~/.zshrc) may
+# still define - and zsh would expand that alias here, breaking the function definition.
+unalias open-local 2>/dev/null
 open-local () {
 	if [ -f "$DOTFILES/local/shell_local.sh" ]; then
 		code "$DOTFILES/local/shell_local.sh"

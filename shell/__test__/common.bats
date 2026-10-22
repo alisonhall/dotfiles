@@ -133,3 +133,19 @@ with_path_front() {
 	with_path_front "$DIRS/a2:/usr/bin" "path_front '$DIRS/a'"
 	[ "$output" = "$DIRS/a:$DIRS/a2:/usr/bin" ]
 }
+
+#   -------------------------------
+#   open-local
+#   -------------------------------
+
+# It used to be an alias, which old config may still define before common.sh loads
+@test "open-local: becomes a function even when an old open-local alias is already defined" {
+	piece '^unalias open-local' '^}' > "$BATS_TEST_TMPDIR/open-local.sh"
+	run bash -c 'shopt -s expand_aliases; alias open-local="code ~/.shell_local"; source "$1" && type -t open-local' _ "$BATS_TEST_TMPDIR/open-local.sh"
+	[ "$status" -eq 0 ]
+	[ "$output" = function ] || false
+	command -v zsh >/dev/null 2>&1 || skip "zsh isn't installed"
+	run zsh -c 'alias open-local="code ~/.shell_local"; source "$1" && whence -w open-local' _ "$BATS_TEST_TMPDIR/open-local.sh"
+	[ "$status" -eq 0 ]
+	[ "$output" = "open-local: function" ] || false
+}
