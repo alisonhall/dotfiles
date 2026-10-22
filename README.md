@@ -39,6 +39,7 @@ The installer doesn't replace your existing config files. Anything it does chang
 - creates `local/` (see below), asking first whether to set it up as its own git repo (defaulting to yes), and creates `local/shell_local.sh` from [local.example.sh](local.example.sh) if there's nothing to move yet
 - moves an existing `~/.shell_local` and `~/.dotfiles_blocklist` into `local/` automatically; asks first before moving an existing `~/.p10k.zsh` or the settings below the include in `~/.gitconfig` (defaulting to yes). Say no (or just leave the file where it is) and everything keeps working from its original location - see [Local setup](#local-setup)
 - on macOS, points iTerm at `config/iterm` for its settings
+- adds the settings VS Code needs (e.g. the terminal font for the prompt's icons) to VS Code's user settings, if they're missing - see [VS Code](#vs-code)
 - installs gitleaks if it's missing (see [Committing](#committing))
 - before changing anything, stops if it's run as root, git is missing, or the repo's shell files have syntax errors or Windows line endings
 - finally, starts a new bash (and zsh) shell and checks that it loads this repo, and that git loads the shared config
@@ -104,7 +105,7 @@ These live in `git/` rather than `bin/` because you run them through a git alias
 
 ### VS Code
 
-Unlike the shell and git config, `config/vscode/` isn't linked in automatically by `install.sh`. It's a reference copy of portable editor settings and snippets:
+Unlike the shell and git config, `config/vscode/` isn't linked in automatically by `install.sh` - VS Code edits its own settings file all the time, so a link would turn every change into an edit to this repo. It's a reference copy of portable editor settings and snippets:
 
 | File | Contents |
 | --- | --- |
@@ -113,11 +114,7 @@ Unlike the shell and git config, `config/vscode/` isn't linked in automatically 
 
 To use them, copy or symlink `config/vscode/settings.json` to VS Code's user `settings.json` (`code --locate-shell-integration-path` or Cmd+Shift+P → "Preferences: Open User Settings (JSON)" shows the path), and `config/vscode/global.code-snippets` into the same folder's `snippets/`. Merge rather than overwrite if you already have machine- or work-specific settings there.
 
-**Prompt icons in VS Code's terminal:** the zsh prompt's icons need an icon font, but VS Code's terminal doesn't use iTerm's settings - it uses `terminal.integrated.fontFamily` from VS Code's own settings, falling back to the editor font (usually without the icons). `config/vscode/settings.json` sets it to `MesloLGS NF`, the font `install.sh` installs for the prompt and `config/iterm` uses. If you don't copy the whole file, add just that setting:
-
-```json
-"terminal.integrated.fontFamily": "MesloLGS NF"
-```
+**Settings `install.sh` adds:** a few settings VS Code needs for the dotfiles to look right are added to VS Code's own user settings by `install.sh`, if they're missing (the list is `VSCODE_SETTINGS` in `install.sh`). Anything you've already set - even to a different value - is left as it is and noted, the rest of the file isn't touched, and it's backed up first. It only does this where VS Code has been used (its settings folder exists); `install.sh --check` notes what's missing. For now the list is just the terminal font: the zsh prompt's icons need an icon font, but VS Code's terminal doesn't use iTerm's settings, so `install.sh` sets `"terminal.integrated.fontFamily": "MesloLGS NF"` - the font it installs for the prompt, and the one `config/iterm` uses.
 
 ## Scripts
 

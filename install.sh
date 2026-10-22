@@ -1034,6 +1034,80 @@ setup_iterm() {
 }
 
 #   -------------------------------
+#   VS CODE
+#   -------------------------------
+
+# Settings VS Code needs for the dotfiles to look right, added to VS Code's own user settings if
+# they're missing (<setting>|<JSON value>). Anything already set there - even to something else - is
+# left as it is, and the rest of the file is never touched.
+VSCODE_SETTINGS=(
+	'terminal.integrated.fontFamily|"MesloLGS NF"'    # The zsh prompt's icon font (VS Code's terminal doesn't use iTerm's)
+)
+
+# VS Code's user settings folder on this OS
+vscode_settings_dir() {
+	case "$(uname -s)" in
+		Darwin*) echo "$HOME/Library/Application Support/Code/User" ;;
+		MINGW* | MSYS* | CYGWIN*) [ -n "${APPDATA:-}" ] && echo "$(cygpath -u "$APPDATA")/Code/User" ;;
+		*) echo "${XDG_CONFIG_HOME:-$HOME/.config}/Code/User" ;;
+	esac
+	return 0
+}
+
+# vscode_setting <settings.json> <setting>: The setting's value as written there (empty if it's not set)
+vscode_setting() {
+	[ -f "$1" ] || return 0
+	local key_re
+	key_re="$(printf '%s' "$2" | sed 's/[][\.*^$]/\\&/g')"
+	sed -nE "s/^[[:space:]]*\"$key_re\"[[:space:]]*:[[:space:]]*(.*[^,[:space:]])[[:space:]]*,?[[:space:]]*$/\1/p" "$1" | head -n 1
+}
+
+# add_vscode_setting <settings.json> <setting> <JSON value>: Adds it as the file's first setting.
+# (settings.json allows comments and trailing commas, so a line after the opening { is enough.)
+add_vscode_setting() {
+	local file="$1" line="  \"$2\": $3"
+	if [ ! -s "$file" ] || ! grep -q '[^[:space:]{}]' "$file"; then
+		# Missing, empty, or just {}
+		printf '{\n%s\n}\n' "$line" > "$file"
+		return
+	fi
+	local updated
+	updated="$(LINE="$line" awk '!done && /^[[:space:]]*\{/ { sub(/\{/, "{\n" ENVIRON["LINE"] ","); done = 1 } { print }' "$file")"
+	printf '%s\n' "$updated" > "$file"
+}
+
+# setup_vscode: Adds the VSCODE_SETTINGS that VS Code's user settings don't have. Only where VS Code
+# has been used (its settings folder exists). In --check mode, only reports what's missing.
+setup_vscode() {
+	local dir file entry key value current saved=""
+	dir="$(vscode_settings_dir)"
+	[ -n "$dir" ] && [ -d "$dir" ] || return 0
+	echo "VS Code:"
+	file="$dir/settings.json"
+	for entry in "${VSCODE_SETTINGS[@]}"; do
+		key="${entry%%|*}"
+		value="${entry#*|}"
+		current="$(vscode_setting "$file" "$key")"
+		if [ "$current" = "$value" ]; then
+			ok "$key is $value"
+		elif [ -n "$current" ]; then
+			note "VS Code's $key is $current rather than $value - left as you have it"
+		elif [ "$MODE" = check ]; then
+			note "VS Code's settings don't set $key - run ./install.sh to add \"$key\": $value"
+		else
+			if [ -z "$saved" ] && [ -f "$file" ]; then
+				saved="$(backup "$file")"
+			fi
+			add_vscode_setting "$file" "$key" "$value"
+			echo "  Added \"$key\": $value to $file"
+		fi
+	done
+	if [ -n "$saved" ]; then
+		detail "(old version in $saved)"
+	fi
+}
+
+#   -------------------------------
 #   THIS REPO
 #   -------------------------------
 
@@ -1379,6 +1453,7 @@ main() {
 		run_local_install
 		setup_local_links
 		setup_iterm
+		setup_vscode
 		setup_repo_hooks
 	fi
 
@@ -1386,6 +1461,7 @@ main() {
 	check_startup_files
 	check_gitconfig
 	[ "$MODE" = check ] && run_local_install --check
+	[ "$MODE" = check ] && setup_vscode
 	check_new_shells
 	check_reminders
 

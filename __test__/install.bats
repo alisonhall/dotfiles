@@ -895,3 +895,84 @@ private_repo_local() {
 	[ -f "$(ls -d "$LOCAL_DIR"/backups/*/HOME/.zshrc)" ]
 	[ -f "$(ls -d "$LOCAL_DIR"/backups/*/HOME/.gitconfig)" ]
 }
+
+#   -------------------------------
+#   VS Code settings
+#   -------------------------------
+
+# vscode_dir: VS Code's user settings folder in the fake home folder, created (as if VS Code had been used)
+vscode_dir() {
+	export APPDATA="$HOME/AppData/Roaming"    # Windows; elsewhere it's under $HOME already
+	call vscode_settings_dir
+	VSCODE_DIR="$output"
+	mkdir -p "$VSCODE_DIR"
+}
+
+# Whether settings.json is still valid JSON, ignoring // comments and trailing commas like VS Code
+# does (checked with python3 when there is one)
+valid_settings() {
+	command -v python3 >/dev/null 2>&1 || return 0
+	python3 -c '
+import json, re, sys
+text = re.sub(r"^\s*//.*$", "", open(sys.argv[1]).read(), flags=re.M)
+json.loads(re.sub(r",(\s*[}\]])", r"\1", text))' "$1"
+}
+
+@test "VS Code: adds the terminal font to existing settings, keeping everything else and backing up" {
+	vscode_dir
+	printf '%s\n' '{' '  // My settings' '  "editor.fontSize": 12,' '  "workbench.colorTheme": "Default Dark+"' '}' > "$VSCODE_DIR/settings.json"
+	call setup_vscode
+	[ "$status" -eq 0 ]
+	[[ "$output" == *'Added "terminal.integrated.fontFamily": "MesloLGS NF"'* ]] || false
+	grep -qF '"terminal.integrated.fontFamily": "MesloLGS NF",' "$VSCODE_DIR/settings.json"
+	grep -qF '"editor.fontSize": 12,' "$VSCODE_DIR/settings.json"
+	grep -qF '// My settings' "$VSCODE_DIR/settings.json"
+	valid_settings "$VSCODE_DIR/settings.json"
+	[ -n "$(find "$LOCAL_DIR/backups" -name settings.json)" ]
+}
+
+@test "VS Code: a font you've already set, even to something else, is left alone" {
+	vscode_dir
+	printf '{\n  "terminal.integrated.fontFamily": "Fira Code"\n}\n' > "$VSCODE_DIR/settings.json"
+	before="$(cksum < "$VSCODE_DIR/settings.json")"
+	call setup_vscode
+	[[ "$output" == *'NOTE: VS Code'"'"'s terminal.integrated.fontFamily is "Fira Code" rather than "MesloLGS NF" - left as you have it'* ]] || false
+	[ "$(cksum < "$VSCODE_DIR/settings.json")" = "$before" ]
+}
+
+@test "VS Code: creates settings.json when VS Code has none yet, and handles an empty {}" {
+	vscode_dir
+	call setup_vscode
+	valid_settings "$VSCODE_DIR/settings.json"
+	grep -qF '"terminal.integrated.fontFamily": "MesloLGS NF"' "$VSCODE_DIR/settings.json"
+	printf '{}\n' > "$VSCODE_DIR/settings.json"
+	call setup_vscode
+	valid_settings "$VSCODE_DIR/settings.json"
+	grep -qF '"terminal.integrated.fontFamily": "MesloLGS NF"' "$VSCODE_DIR/settings.json"
+}
+
+@test "VS Code: does nothing where VS Code hasn't been used" {
+	export APPDATA="$HOME/AppData/Roaming"
+	call setup_vscode
+	[ -z "$output" ]
+	[ -z "$(find "$HOME" -name settings.json)" ]
+}
+
+@test "VS Code: a second run changes nothing" {
+	vscode_dir
+	printf '{\n  "editor.fontSize": 12\n}\n' > "$VSCODE_DIR/settings.json"
+	call setup_vscode
+	before="$(cksum < "$VSCODE_DIR/settings.json")"
+	call setup_vscode
+	[[ "$output" == *'OK: terminal.integrated.fontFamily is "MesloLGS NF"'* ]] || false
+	[ "$(cksum < "$VSCODE_DIR/settings.json")" = "$before" ]
+}
+
+@test "VS Code --check: says what's missing, and changes nothing" {
+	vscode_dir
+	printf '{\n  "editor.fontSize": 12\n}\n' > "$VSCODE_DIR/settings.json"
+	before="$(cksum < "$VSCODE_DIR/settings.json")"
+	MODE_FLAG=--check call setup_vscode
+	[[ "$output" == *"NOTE: VS Code's settings don't set terminal.integrated.fontFamily"* ]] || false
+	[ "$(cksum < "$VSCODE_DIR/settings.json")" = "$before" ]
+}
