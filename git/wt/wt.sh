@@ -54,6 +54,15 @@ if [ "$_wt_sourced" = "1" ]; then
         cd "$WT_WORKTREE_REPO_LOCATION/main"
         ;;
       add|cd)
+        # With no branch, ask for it: a name pasted at the prompt is read as typed, whereas on
+        # the command line the shell would act on characters like & or ; before wt saw them
+        if [ $# -eq 0 ]; then
+          local branch
+          printf 'Branch name: ' >&2
+          read -r branch || return 1
+          [ -n "$branch" ] || { echo "wt $sub: no branch name given" >&2; return 1; }
+          set -- "$branch"
+        fi
         bash "$WT_DIR/wt.sh" "$sub" "$@" || return 1
         cd "$WT_WORKTREE_REPO_LOCATION/${1//\//_}"
         ;;
@@ -97,7 +106,10 @@ Commands:
                           the full `wt add <branch>` (same remote-branch /
                           squash-merge-PR recovery, symlinks, and workspace
                           linking), then cd's into it.
-  rm <branch>             Remove a worktree folder and prune stale worktree
+                          For add and cd, leave out <branch> to be asked for
+                          it: paste a name with characters like & ; ( ) there,
+                          or put it in single quotes on the command line.
+  rm <branch>            Remove a worktree folder and prune stale worktree
                           registrations.
   ls [options]            List every worktree: branch, remote branch (and
                           whether it still exists), separate-folder marker,

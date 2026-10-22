@@ -29,7 +29,8 @@ setup() {
 	# A gh that's logged in. Asked for every pull request of a branch (wt clean), it says each
 	# existing branch's was merged at its current commit (a branch that doesn't exist yet has
 	# none). Asked for merged ones only (wt add and wt cd), it lists those in FAKE_MERGED_PRS
-	# ("<branch>=<number> ..."). Like the real gh, it needs --repo outside a clone.
+	# ("<branch>=<number> ..."), as "<number><TAB><branch>" lines like find_merged_pr's --jq
+	# makes. Like the real gh, it needs --repo outside a clone.
 	mkdir -p "$BATS_TEST_TMPDIR/bin"
 	cat > "$BATS_TEST_TMPDIR/bin/gh" <<-'EOF'
 		#!/usr/bin/env bash
@@ -51,7 +52,7 @@ setup() {
 				fi
 				if [ "$state" = merged ]; then
 					for pr in ${FAKE_MERGED_PRS:-}; do
-						[ "${pr%%=*}" = "$head" ] && echo "${pr#*=}"
+						[ "${pr%%=*}" = "$head" ] && printf '%s\t%s\n' "${pr#*=}" "$head"
 					done
 				else
 					oid="$(git -C "$WT_WORKTREE_REPO_LOCATION/main" rev-parse --verify --quiet "refs/heads/$head")" &&
@@ -103,7 +104,9 @@ is_windows() {
 # a symlink elsewhere
 link_dir() {
 	if is_windows; then
-		MSYS2_ARG_CONV_EXCL="*" cmd /c mklink /J "$(cygpath -w "$2")" "$(cygpath -w "$1")" >/dev/null
+		# (The same way as make_link in wt-common.sh, so folder names with & and such work)
+		WT_MKLINK_ARGS="\"$(cygpath -w "$2")\" \"$(cygpath -w "$1")\"" \
+			MSYS2_ARG_CONV_EXCL="*" cmd /d /v:on /c 'mklink /J !WT_MKLINK_ARGS!' >/dev/null
 	else
 		ln -s "$1" "$2"
 	fi
@@ -435,6 +438,23 @@ deleted_after_merge() {
 	echo "$sha"
 }
 
+@test "on Windows without symlinks, a shared folder's junction works in a folder with & ^ % ; in its name" {
+	is_windows || skip "only Windows uses junctions"
+	# The folder name from a branch like feature/a&b^c%OS%;d, in a repo location with a space and a !
+	local base="$BATS_TEST_TMPDIR/my repo!" folder
+	folder="$base/feature_a&b^c%OS%;d"
+	mkdir -p "$base/main/node_modules/pkg" "$folder"
+	echo 'module.exports = 42' > "$base/main/node_modules/pkg/index.js"
+	# As if Developer Mode were off, so make_link can't make a real symlink
+	run bash -c '. "$1/wt-common.sh"; ln() { [ "$1" = -s ] && return 1; command ln "$@"; }
+		make_link "$2/main/node_modules" "$3/node_modules"' _ "$WT" "$base" "$folder"
+	[ "$status" -eq 0 ]
+	[ "$(cat "$folder/node_modules/pkg/index.js")" = 'module.exports = 42' ]
+	# A junction, not a copy: changes to main's show through
+	echo changed > "$base/main/node_modules/pkg/index.js"
+	[ "$(cat "$folder/node_modules/pkg/index.js")" = changed ]
+}
+
 #   -------------------------------
 #   BRANCHES DELETED AFTER MERGING
 #   -------------------------------
@@ -455,6 +475,21 @@ deleted_after_merge() {
 	run bash "$WT/wt.sh" add feature/gone
 	[ "$status" -eq 0 ]
 	[ "$(git -C "$WT_WORKTREE_REPO_LOCATION/feature_gone" rev-parse HEAD)" = "$sha" ]
+}
+
+@test "the merged pull request is found for a branch with \" \\ & or ' in its name" {
+	# (Called directly: no Windows folder can be named after a branch with " or \ in it)
+	local branch
+	for branch in 'say-"hi"' 'back\slash' 'fix-a&b' "it's"; do
+		export FAKE_MERGED_PRS="feature/other=3 $branch=7"
+		run bash -c '. "$1/wt-common.sh"; MAIN_WT="$2"; REMOTE_BRANCH_NAME="$3"; find_merged_pr' \
+			_ "$WT" "$MAIN" "$branch"
+		[ "$status" -eq 0 ]
+		[ "$output" = 7 ] || { echo "$branch: got '$output'" >&2; false; }
+	done
+	# And only that branch's: a name that only starts the same finds nothing
+	run bash -c '. "$1/wt-common.sh"; MAIN_WT="$2"; REMOTE_BRANCH_NAME="say"; find_merged_pr' _ "$WT" "$MAIN"
+	[ "$output" = "" ]
 }
 
 #   -------------------------------
@@ -566,6 +601,31 @@ deleted_after_merge() {
 	run bash -c 'unset WT_WORKTREE_REPO_LOCATION; . "$1/wt.sh" && wt main' _ "$WT"
 	[ "$status" -eq 2 ]
 	[[ "$output" == *"WT_WORKTREE_REPO_LOCATION is not set"* ]] || false
+}
+
+@test "wt cd with no branch asks for one, and takes a name with & as it is" {
+	git -C "$MAIN" push -q origin 'main:refs/heads/feature/fix-a&b' 2>/dev/null
+	run bash -c '. "$1/wt.sh" && wt cd <<< "feature/fix-a&b" >/dev/null && pwd && git branch --show-current' _ "$WT"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"Branch name: "* ]] || false
+	[ "${lines[$((${#lines[@]} - 2))]}" -ef "$WT_WORKTREE_REPO_LOCATION/feature_fix-a&b" ]
+	[ "${lines[$((${#lines[@]} - 1))]}" = 'feature/fix-a&b' ]
+	[ "$(git -C "$WT_WORKTREE_REPO_LOCATION/feature_fix-a&b" rev-parse --abbrev-ref '@{upstream}')" = 'origin/feature/fix-a&b' ]
+}
+
+@test "wt add with no branch asks for one, and stops if none is given" {
+	run bash -c '. "$1/wt.sh" && wt add <<< ""' _ "$WT"
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"wt add: no branch name given"* ]] || false
+	[ "$(ls "$WT_WORKTREE_REPO_LOCATION")" = main ]
+}
+
+@test "zsh's wt asks for a branch too" {
+	command -v zsh >/dev/null 2>&1 || skip "zsh isn't installed"
+	git -C "$MAIN" push -q origin 'main:refs/heads/fix(a);b' 2>/dev/null
+	run zsh -f -c 'source "$1/wt.sh" && wt cd <<< "fix(a);b" >/dev/null && git branch --show-current' _ "$WT"
+	[ "$status" -eq 0 ]
+	[ "${lines[${#lines[@]} - 1]}" = 'fix(a);b' ]
 }
 
 @test "zsh loads wt even with FUNCTION_ARGZERO off" {

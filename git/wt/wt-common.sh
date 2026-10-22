@@ -14,6 +14,9 @@
 # gh needs to know the repo: from WT_REPO_SLUG if it's set, and otherwise from the clone it's run
 # in. So it runs in the main worktree, since wt-add.sh works from the collection folder, which
 # isn't a clone (and gh fails there, which this would otherwise hide as "no merged PR").
+#
+# The exact match is checked here rather than in --jq, which has no way to pass the branch name
+# in as data: written into the filter, a name with " or \ in it would break it.
 find_merged_pr() {
 	command -v gh >/dev/null 2>&1 || return 0
 	(
@@ -21,7 +24,14 @@ find_merged_pr() {
 		if [ -n "${WT_REPO_SLUG:-}" ]; then set -- --repo "$WT_REPO_SLUG"; else set --; fi
 		gh pr list "$@" --state merged --head "$REMOTE_BRANCH_NAME" \
 			--json number,headRefName \
-			--jq '.[] | select(.headRefName == "'"$REMOTE_BRANCH_NAME"'") | .number' 2>/dev/null | head -n 1
+			--jq '.[] | "\(.number)\t\(.headRefName)"' 2>/dev/null |
+			while IFS=$'\t' read -r number head; do
+				# (A branch name can't hold a tab or a newline, so each line splits cleanly)
+				if [ "$head" = "$REMOTE_BRANCH_NAME" ]; then
+					echo "$number"
+					break
+				fi
+			done
 	)
 }
 
@@ -80,8 +90,13 @@ make_link() {
 	# A real symlink, if Windows allows them (Developer Mode); this fails rather than copying
 	MSYS=winsymlinks:nativestrict ln -s "$target" "$link" 2>/dev/null && return 0
 	if [ -d "$target" ]; then
-		# (Separate arguments, without Git Bash converting them, so paths with spaces work)
-		MSYS2_ARG_CONV_EXCL='*' cmd /c mklink /J "$(cygpath -w "$link")" "$(cygpath -w "$target")" >/dev/null
+		# The paths reach cmd in a variable that's expanded with !...! only after cmd has read the
+		# line, so it doesn't act on characters like & ^ % ; in them (a branch folder can have those).
+		# Git Bash would escape quotes written in the command itself, which cmd doesn't understand,
+		# so they're in the variable too. (No Windows path can contain a ".) MSYS2_ARG_CONV_EXCL
+		# stops Git Bash converting /J and the others to paths.
+		WT_MKLINK_ARGS="\"$(cygpath -w "$link")\" \"$(cygpath -w "$target")\"" \
+			MSYS2_ARG_CONV_EXCL='*' cmd /d /v:on /c 'mklink /J !WT_MKLINK_ARGS!' >/dev/null
 	else
 		ln "$target" "$link"
 	fi
