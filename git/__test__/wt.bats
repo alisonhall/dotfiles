@@ -684,16 +684,34 @@ ls => unchanged"
 	zsh -fc 'zmodload zsh/zpty' 2>/dev/null || skip "zsh has no zpty module"
 	export OUT="$BATS_TEST_TMPDIR/args"
 	# Type the line into a real interactive zsh, through a pseudo-terminal, so Enter goes through
-	# its line editor as it would for a person. orx-wt stands in for a per-repo command.
+	# its line editor as it would for a person. orx-wt stands in for a per-repo command. Each line
+	# is typed only once zsh shows a prompt, since what's typed while it starts can be dropped.
 	run zsh -fc '
 		zmodload zsh/zpty
-		zpty -b t "zsh -fi"
-		zpty -w t "source \"$1/wt.sh\"; orx-wt() { print -r -- \"[\$#] \$*\" > \"\$OUT\" }"
+		zpty t "zsh -fi"
+		screen=""
+		# wait_for <pattern>: Read what zsh shows until it matches <pattern>, for up to 10 seconds
+		wait_for() {
+			local chunk i
+			for i in {1..100}; do
+				while zpty -rt t chunk 2>/dev/null; do screen+=$chunk; done
+				[[ $screen == $~1 ]] && return 0
+				sleep 0.1
+			done
+			return 1
+		}
+		fail() { print -r -- "$1; the terminal showed:"; print -r -- "$screen"; zpty -d t; exit 1; }
+		wait_for "*[%#]*" || fail "no first prompt"
+		# (The new prompt is written in two parts, so that typing it doesn'"'"'t match it)
+		screen=""
+		zpty -w t "PS1=\"wt-\"\"ready> \"; source \"$1/wt.sh\"; orx-wt() { print -r -- \"[\$#] \$*\" > \"\$OUT\" }"
+		wait_for "*wt-ready> *" || fail "no prompt after loading wt.sh"
 		zpty -w t "orx-wt cd mmotam/TA34362520/Allergies-and-Diseases-&-Member-To-Do"
-		for i in {1..50}; do [[ -s $OUT ]] && break; sleep 0.1; done
+		for i in {1..100}; do [[ -s $OUT ]] && break; sleep 0.1; done
+		[[ -s $OUT ]] || { wait_for "*wt-ready> *wt-ready> *"; fail "orx-wt wasn'"'"'t run"; }
 		zpty -d t
 		cat "$OUT"' _ "$WT"
-	[ "$status" -eq 0 ]
+	[ "$status" -eq 0 ] || { echo "$output" | cat -v >&2; false; }
 	[ "$output" = "[2] cd mmotam/TA34362520/Allergies-and-Diseases-&-Member-To-Do" ]
 }
 
