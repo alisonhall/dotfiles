@@ -1001,9 +1001,10 @@ vscode_dir() {
 }
 
 # Whether settings.json is still valid JSON, ignoring // comments and trailing commas like VS Code
-# does (checked with python3 when there is one)
+# does (checked with python3 when there is one - one that runs, not Windows's python3 that only
+# offers to install it from the Microsoft Store)
 valid_settings() {
-	command -v python3 >/dev/null 2>&1 || return 0
+	python3 -c '' >/dev/null 2>&1 || return 0
 	python3 -c '
 import json, re, sys
 text = re.sub(r"^\s*//.*$", "", open(sys.argv[1]).read(), flags=re.M)
