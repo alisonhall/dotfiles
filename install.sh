@@ -337,6 +337,47 @@ migrate_into_local() {
 	echo "  Moved $old to $new"
 }
 
+# blocklist_missing <from> <to>: The entries in blocklist <from> that <to> doesn't have, matched
+# exactly as the pre-commit hook reads them (Windows line endings, blank lines and comments ignored)
+blocklist_missing() {
+	TO="$2" awk '
+		{ sub(/\r$/, "") }
+		$0 == "" || substr($0, 1, 1) == "#" { next }
+		FILENAME == ENVIRON["TO"] { have[$0] = 1; next }
+		!($0 in have) && !seen[$0]++' "$2" "$1"
+}
+
+entry_count() { if [ "$1" = 1 ]; then echo "1 entry"; else echo "$1 entries"; fi; }
+
+# merge_leftover_blocklist: When ~/.dotfiles_blocklist is still around but $LOCAL_DIR already has its
+# own (e.g. a private repo in local/ brought one), the pre-commit hook only reads $LOCAL_DIR's, so
+# anything only in ~/.dotfiles_blocklist goes unchecked. Offers to add those entries (defaulting to
+# yes), then moves ~/.dotfiles_blocklist to the backup folder - or just moves it, if nothing's missing.
+merge_leftover_blocklist() {
+	local old="$HOME/.dotfiles_blocklist" new="$LOCAL_DIR/dotfiles_blocklist" missing count eol=$'\n'
+	# (A link is left for local/'s own install.sh, which removes one to an old copy)
+	[ -f "$old" ] && [ ! -L "$old" ] && [ -f "$new" ] || return 0
+	missing="$(blocklist_missing "$old" "$new")"
+	if [ -z "$missing" ]; then
+		echo "  Moved $old to $(backup "$old" --move) - everything in it is already in $new"
+		return 0
+	fi
+	count="$(entry_count "$(printf '%s\n' "$missing" | wc -l | tr -d ' ')")"
+	if ! ask_yes_no "  $old has $count that $new doesn't, so the pre-commit hook isn't checking them. Add them to $new?" y; then
+		warning "$old has $count the pre-commit hook isn't checking, since it reads $new - add them there, then delete $old"
+		return 0
+	fi
+	# With the file's own line endings, after a line break if its last line doesn't have one
+	[ "$(tr -cd '\r' <"$new" | wc -c | tr -d ' ')" = 0 ] || eol=$'\r\n'
+	{
+		[ -z "$(tail -c 1 "$new")" ] || printf '%s' "$eol"
+		printf '%s# From ~/.dotfiles_blocklist (added by install.sh)%s' "$eol" "$eol"
+		printf '%s\n' "$missing" | while IFS= read -r entry; do printf '%s%s' "$entry" "$eol"; done
+	} >>"$new"
+	local_changed "$new"
+	echo "  Added $count from $old to $new, and moved $old to $(backup "$old" --move)"
+}
+
 # active_local_file <name in $LOCAL_DIR> <legacy path outside the repo>: Echoes whichever of the
 # two currently exists, preferring $LOCAL_DIR - so checks here still find the right file whether a
 # migration was accepted, declined (p10k.zsh, gitconfig - see setup_local_gitconfig), or a file was
@@ -547,6 +588,7 @@ EOF
 	migrate_into_local "$HOME/.shell_local" "$LOCAL_DIR/shell_local.sh"
 	migrate_into_local "$HOME/.p10k.zsh" "$LOCAL_DIR/p10k.zsh" --confirm
 	migrate_into_local "$HOME/.dotfiles_blocklist" "$LOCAL_DIR/dotfiles_blocklist"
+	merge_leftover_blocklist
 
 	if [ ! -f "$LOCAL_DIR/shell_local.sh" ]; then
 		cp "$DOTFILES/local.example.sh" "$LOCAL_DIR/shell_local.sh"
@@ -1538,6 +1580,17 @@ check_reminders() {
 		:
 	else
 		blocklist="$(active_local_file dotfiles_blocklist "$HOME/.dotfiles_blocklist")"
+		if [ -f "$HOME/.dotfiles_blocklist" ] && [ ! -L "$HOME/.dotfiles_blocklist" ] &&
+			[ "$blocklist" = "$LOCAL_DIR/dotfiles_blocklist" ]; then
+			local missing
+			missing="$(blocklist_missing "$HOME/.dotfiles_blocklist" "$blocklist" | wc -l | tr -d ' ')"
+			if [ "$missing" -gt 0 ]; then
+				warning "~/.dotfiles_blocklist has $(entry_count "$missing") that $blocklist doesn't, so the pre-commit hook isn't checking them - run ./install.sh to add them"
+			else
+				note "~/.dotfiles_blocklist is left over - everything in it is in $blocklist, which the pre-commit hook reads. Run ./install.sh to move it to the backup folder"
+			fi
+			reminders_shown=1
+		fi
 		if [ ! -f "$blocklist" ] || ! grep -qvE '^[[:space:]]*(#|$)' "$blocklist"; then
 			note "$blocklist has no entries. If you commit to this repo from this machine, add"
 			detail "your personal strings (emails, employer names...) or copy the file from another machine."

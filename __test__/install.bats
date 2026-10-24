@@ -328,6 +328,56 @@ needs_symlinks() {
 	[ ! -e "$HOME/.dotfiles_blocklist" ]
 }
 
+@test "setup_local_dir: adds what a leftover ~/.dotfiles_blocklist has that LOCAL_DIR's doesn't, then backs it up" {
+	mkdir -p "$LOCAL_DIR"
+	printf '# mine\r\nshared@example.com\r\n' > "$LOCAL_DIR/dotfiles_blocklist"
+	printf 'shared@example.com\nold-only\nre:PROJ-[0-9]+\n\n# a comment\nold-only\n' > "$HOME/.dotfiles_blocklist"
+	call setup_local_dir
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"Added 2 entries from $HOME/.dotfiles_blocklist"* ]] || false
+	[ ! -e "$HOME/.dotfiles_blocklist" ]
+	ls "$LOCAL_DIR"/backups/*/HOME/.dotfiles_blocklist
+	# Each entry once, after a comment saying where they came from, in the file's own line endings
+	list="$(tr -d '\r' < "$LOCAL_DIR/dotfiles_blocklist")"
+	[ "$(grep -cxF shared@example.com <<<"$list")" -eq 1 ]
+	[ "$(grep -cxF old-only <<<"$list")" -eq 1 ]
+	grep -qxF 're:PROJ-[0-9]+' <<<"$list"
+	grep -qxF '# From ~/.dotfiles_blocklist (added by install.sh)' <<<"$list"
+	[ "$(tr -cd '\r' < "$LOCAL_DIR/dotfiles_blocklist" | wc -c)" -eq "$(wc -l < "$LOCAL_DIR/dotfiles_blocklist")" ]
+}
+
+@test "setup_local_dir: declining to merge a leftover ~/.dotfiles_blocklist leaves both, with a warning" {
+	git init -q "$LOCAL_DIR"
+	printf 'shared@example.com\n' > "$LOCAL_DIR/dotfiles_blocklist"
+	printf 'old-only\n' > "$HOME/.dotfiles_blocklist"
+	call_answering n setup_local_dir
+	[[ "$output" == *"WARNING: $HOME/.dotfiles_blocklist has 1 entry the pre-commit hook isn't checking"* ]] || false
+	[ "$(cat "$HOME/.dotfiles_blocklist")" = old-only ]
+	[ "$(cat "$LOCAL_DIR/dotfiles_blocklist")" = shared@example.com ]
+}
+
+@test "setup_local_dir: a leftover ~/.dotfiles_blocklist with nothing new in it is just backed up" {
+	mkdir -p "$LOCAL_DIR"
+	printf 'shared@example.com\nother\n' > "$LOCAL_DIR/dotfiles_blocklist"
+	printf '# old\nother\n' > "$HOME/.dotfiles_blocklist"
+	before="$(checksum "$LOCAL_DIR/dotfiles_blocklist")"
+	call setup_local_dir
+	[[ "$output" == *"everything in it is already in $LOCAL_DIR/dotfiles_blocklist"* ]] || false
+	[ ! -e "$HOME/.dotfiles_blocklist" ]
+	[ "$(checksum "$LOCAL_DIR/dotfiles_blocklist")" = "$before" ]
+}
+
+@test "setup_local_dir: leaves a ~/.dotfiles_blocklist link for local/'s own install.sh to deal with" {
+	needs_symlinks
+	mkdir -p "$LOCAL_DIR" "$BATS_TEST_TMPDIR/old bin"
+	printf 'shared@example.com\n' > "$LOCAL_DIR/dotfiles_blocklist"
+	printf 'old-only\n' > "$BATS_TEST_TMPDIR/old bin/dotfiles_blocklist"
+	symlink "$BATS_TEST_TMPDIR/old bin/dotfiles_blocklist" "$HOME/.dotfiles_blocklist"
+	call setup_local_dir
+	[ -L "$HOME/.dotfiles_blocklist" ]
+	[ "$(cat "$LOCAL_DIR/dotfiles_blocklist")" = shared@example.com ]
+}
+
 @test "setup_local_dir: a second run changes nothing" {
 	call setup_local_dir
 	before="$(git -C "$LOCAL_DIR" rev-parse HEAD)"
@@ -526,6 +576,19 @@ needs_symlinks() {
 @test "check_reminders: reports the blocklist missing by its legacy path, not LOCAL_DIR's" {
 	call check_reminders
 	[[ "$output" == *"$HOME/.dotfiles_blocklist has no entries"* ]] || false
+}
+
+@test "check_reminders: warns about entries only in a leftover ~/.dotfiles_blocklist" {
+	mkdir -p "$LOCAL_DIR"
+	printf 'shared@example.com\n' > "$LOCAL_DIR/dotfiles_blocklist"
+	printf 'shared@example.com\nold-one\nold-two\n' > "$HOME/.dotfiles_blocklist"
+	call check_reminders
+	[[ "$output" == *"WARNING: ~/.dotfiles_blocklist has 2 entries that $LOCAL_DIR/dotfiles_blocklist doesn't"* ]] || false
+	# Only a note once everything in it is there too
+	printf 'shared@example.com\n' > "$HOME/.dotfiles_blocklist"
+	call check_reminders
+	[[ "$output" != *"WARNING: ~/.dotfiles_blocklist"* ]] || false
+	[[ "$output" == *"NOTE: ~/.dotfiles_blocklist is left over"* ]] || false
 }
 
 @test "check_reminders: prefers LOCAL_DIR's shell_local.sh and blocklist when both exist" {
