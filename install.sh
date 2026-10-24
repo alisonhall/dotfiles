@@ -557,10 +557,11 @@ EOF
 
 	if [ ! -f "$LOCAL_DIR/dotfiles_blocklist" ]; then
 		cat > "$LOCAL_DIR/dotfiles_blocklist" <<'EOF'
-# Strings that must never be committed to the public dotfiles repo.
-# One per line, case-insensitive, matched literally (not regex).
-# e.g. personal and work email addresses, employer/client names,
-# server hostnames, IP addresses, your home folder name.
+# Strings that must never be committed to the public dotfiles repo, or appear in its commit messages.
+# One per line, matched anywhere and ignoring case - e.g. personal and work email addresses,
+# employer/client names, server hostnames, IP addresses, your home folder name.
+# A line starting with re: is an extended regular expression instead of plain text,
+# e.g. re:PROJ-[0-9]{4,} for every ticket number like PROJ-1234.
 EOF
 		local_changed dotfiles_blocklist
 		echo "  Created $LOCAL_DIR/dotfiles_blocklist - add personal strings the pre-commit hook should block"

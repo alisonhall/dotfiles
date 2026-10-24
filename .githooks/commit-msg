@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+#
+# This repo is public, and so are its commit messages. Blocks a message containing strings from
+# local/dotfiles_blocklist (or ~/.dotfiles_blocklist) - the pre-commit hook checks the files.
+#
+# Git passes the file holding the message, and keeps it there if the commit is stopped.
+
+repo_root="$(git rev-parse --show-toplevel)"
+if ! bash "$repo_root/tools/check-blocklist.sh" --message "$1" >&2; then
+	echo "commit-msg: reword the message. It's saved in $1 - start from it with:" >&2
+	echo "  git commit -e -F \"$1\"" >&2
+	exit 1
+fi

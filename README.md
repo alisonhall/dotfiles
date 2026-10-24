@@ -148,7 +148,7 @@ Everything in `bin/` is on your `PATH`.
 `install.sh` turns on a pre-commit hook that blocks commits containing:
 
 - secrets, found by [gitleaks](https://github.com/gitleaks/gitleaks), which you need to install
-- any string listed in `local/dotfiles_blocklist` (or `~/.dotfiles_blocklist`), a local list of your own emails, hostnames and similar. Links to this repo on GitHub (from its `origin` remote) are allowed, even though they contain your user name
+- any string listed in `local/dotfiles_blocklist` (or `~/.dotfiles_blocklist`), a local list of your own emails, hostnames and similar, checked by `tools/check-blocklist.sh`. Each line is matched anywhere, ignoring case. A line starting with `re:` is an extended regular expression instead, such as `re:PROJ-[0-9]{4,}` for every ticket number like `PROJ-1234`. Links to this repo on GitHub (from its `origin` remote) are allowed, even though they contain your user name. Commit messages are public too, so a commit-msg hook checks them against the same list
 - shell syntax errors or Windows line endings, checked by `tools/check-syntax.sh`
 - paths that only work on one machine, checked by `tools/check-paths.sh`: this repo's own location, absolute paths to its files (use `"$DOTFILES/bin/..."` instead), or a home folder with a user name in it (use `$HOME` or `~`). To allow a line on purpose, add a comment containing `path-check: ignore`
 - things that work on one OS but not another, checked by `tools/check-portability.sh`:

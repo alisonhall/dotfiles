@@ -7,7 +7,6 @@
 # Bypass a single check:  SKIP_GITLEAKS=1 git commit ...
 
 status=0
-patterns=()
 repo_root="$(git rev-parse --show-toplevel)"
 
 # 1. Secrets (API keys, tokens, passwords) - https://github.com/gitleaks/gitleaks
@@ -31,53 +30,11 @@ else
 fi
 
 # 2. Personal strings listed in local/dotfiles_blocklist (that folder is this machine's own git
-# repo, ignored by this one - see install.sh's setup_local_dir). Falls back to the older
-# ~/.dotfiles_blocklist location for a machine that hasn't re-run install.sh since it moved.
-blocklist="$repo_root/local/dotfiles_blocklist"
-[ -f "$blocklist" ] || blocklist="$HOME/.dotfiles_blocklist"
-if [ -f "$blocklist" ]; then
-	patterns=()
-	blocked=""
-	while IFS= read -r line || [ -n "$line" ]; do
-		line="${line%$'\r'}"
-		case "$line" in ''|'#'*) continue ;; esac
-		patterns+=(-e "$line")
-		blocked+="$line"$'\n'
-	done < "$blocklist"
-
-	if [ ${#patterns[@]} -gt 0 ]; then
-		matches="$(git grep --cached -I -n -i -F "${patterns[@]}")"
-		# This repo's own GitHub URL (github.com/<owner>/<repo>) is already public, so it's allowed
-		# even when the owner's name is blocked: drop it from each line and check what's left
-		repo_url="$(git remote get-url origin 2>/dev/null | sed -nE 's#/$##; s#\.git$##; s#^.*github\.com[:/]([^/]+/[^/]+)$#github.com/\1#p')"
-		# (One awk rather than grep per line: Git Bash's grep can crash there, which would read as
-		# "no match". If awk fails, every match is kept.)
-		if [ -n "$matches" ] && [ -n "$repo_url" ]; then
-			filtered="$(printf '%s\n' "$matches" | REPO_URL="$repo_url" BLOCKED="$blocked" awk '
-				BEGIN { url = tolower(ENVIRON["REPO_URL"]); n = split(tolower(ENVIRON["BLOCKED"]), word, "\n") }
-				{
-					# Drop each copy of the URL, unless it runs on into a longer name (dotfiles-old)
-					line = ""; rest = tolower($0)
-					while ((i = index(rest, url)) > 0) {
-						end = i + length(url)
-						line = line substr(rest, 1, substr(rest, end, 1) ~ /[a-z0-9_-]/ ? end - 1 : i - 1)
-						rest = substr(rest, end)
-					}
-					line = line rest
-					for (w = 1; w <= n; w++) if (word[w] != "" && index(line, word[w])) { print; next }
-				}')" && matches="$filtered"
-		fi
-		if [ -n "$matches" ]; then
-			echo "pre-commit: found strings from $blocklist in staged files:" >&2
-			echo "$matches" >&2
-			echo "  Move these into local/shell_local.sh or local/gitconfig instead." >&2
-			status=1
-		fi
-	fi
-fi
-if [ "${#patterns[@]}" -eq 0 ]; then
-	echo "pre-commit: WARNING - $blocklist is missing or empty, so personal strings (emails," >&2
-	echo "  employer names...) aren't being checked. Copy it from another machine or add your own." >&2
+# repo, ignored by this one - see install.sh's setup_local_dir), or the older ~/.dotfiles_blocklist.
+# The commit-msg hook checks the commit message against it too.
+if ! bash "$repo_root/tools/check-blocklist.sh" >&2; then
+	echo "pre-commit: move these into local/shell_local.sh or local/gitconfig instead." >&2
+	status=1
 fi
 
 # 3. Shell syntax, so a broken file never reaches other machines

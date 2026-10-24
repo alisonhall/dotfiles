@@ -38,8 +38,10 @@ add_index_only() {
 	git -C "$FIX" -c core.protectNTFS=false update-index --add --cacheinfo "${2:-100644},$blob,$1"
 }
 
-# check <name>: Run tools/check-<name>.sh in the fixture repo (with no input, so anything that
-# waits for some fails the test instead of hanging it)
+# check <name> [args...]: Run tools/check-<name>.sh in the fixture repo (with no input, so anything
+# that waits for some fails the test instead of hanging it)
 check() {
-	run bash "$FIX/tools/check-$1.sh" </dev/null
+	local name="$1"
+	shift
+	run bash "$FIX/tools/check-$name.sh" "$@" </dev/null
 }
