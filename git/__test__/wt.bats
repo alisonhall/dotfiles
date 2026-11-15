@@ -609,6 +609,59 @@ deleted_after_merge() {
 	[ "$(git -C "$WT_WORKTREE_REPO_LOCATION/login" branch --show-current)" = login ]
 }
 
+@test "wt add --strict makes nothing for a branch that isn't on GitHub" {
+	run bash "$WT/wt.sh" add --strict feature/typo
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"branch 'feature/typo' isn't on origin - with --strict, no new branch is made"* ]] || false
+	[ "$(ls "$WT_WORKTREE_REPO_LOCATION")" = main ]
+	run git -C "$MAIN" show-ref --verify --quiet refs/heads/feature/typo
+	[ "$status" -ne 0 ]
+}
+
+@test "wt add --strict still checks out a branch that's on GitHub, the option before or after it" {
+	git -C "$MAIN" push -q origin main:refs/heads/feature/a main:refs/heads/feature/b 2>/dev/null
+	run bash "$WT/wt.sh" add --strict feature/a
+	[ "$status" -eq 0 ]
+	run bash "$WT/wt.sh" add feature/b --strict
+	[ "$status" -eq 0 ]
+	[ "$(git -C "$WT_WORKTREE_REPO_LOCATION/feature_a" rev-parse --abbrev-ref '@{upstream}')" = origin/feature/a ]
+	[ "$(git -C "$WT_WORKTREE_REPO_LOCATION/feature_b" rev-parse --abbrev-ref '@{upstream}')" = origin/feature/b ]
+}
+
+@test "wt add --strict still brings back a branch deleted after its pull request was merged" {
+	sha="$(deleted_after_merge feature/gone 7)"
+	export FAKE_MERGED_PRS="feature/gone=7"
+	run bash "$WT/wt.sh" add --strict feature/gone
+	[ "$status" -eq 0 ]
+	[ "$(git -C "$WT_WORKTREE_REPO_LOCATION/feature_gone" rev-parse HEAD)" = "$sha" ]
+}
+
+@test "wt add --strict makes nothing when the merged pull request's head can't be fetched" {
+	export FAKE_MERGED_PRS="feature/gone=7"
+	run bash "$WT/wt.sh" add --strict feature/gone
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"couldn't fetch refs/pull/7/head"* ]] || false
+	[ "$(ls "$WT_WORKTREE_REPO_LOCATION")" = main ]
+}
+
+@test "wt add --strict makes nothing when GitHub can't be asked" {
+	git -C "$MAIN" remote set-url origin "$BATS_TEST_TMPDIR/nowhere.git"
+	run bash "$WT/wt.sh" add --strict feature/a
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"couldn't ask origin whether it has 'feature/a'"* ]] || false
+	[ "$(ls "$WT_WORKTREE_REPO_LOCATION")" = main ]
+}
+
+@test "wt add refuses an option it doesn't know, and wt cd refuses any, rather than taking it for a branch" {
+	run bash "$WT/wt.sh" add --stirct feature/a
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"wt-add: unknown option --stirct"* ]] || false
+	run bash "$WT/wt.sh" cd --strict
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"wt-cd: unknown option --strict"* ]] || false
+	[ "$(ls "$WT_WORKTREE_REPO_LOCATION")" = main ]
+}
+
 @test "wt add and wt cd refuse a folder that holds a different branch with the same folder name" {
 	bash "$WT/wt.sh" add feature/x >/dev/null 2>&1
 	run bash "$WT/wt.sh" add feature_x
@@ -721,6 +774,31 @@ deleted_after_merge() {
 	[ "$(ls "$WT_WORKTREE_REPO_LOCATION")" = main ]
 }
 
+@test "the wt function moves into the branch's folder after wt add --strict, and asks for the branch with only the option" {
+	git -C "$MAIN" push -q origin main:refs/heads/feature/a main:refs/heads/feature/b 2>/dev/null
+	run bash -c '. "$1/wt.sh" && wt add --strict feature/a >/dev/null && pwd' _ "$WT"
+	[ "$status" -eq 0 ]
+	[ "${lines[$((${#lines[@]} - 1))]}" -ef "$WT_WORKTREE_REPO_LOCATION/feature_a" ]
+	run bash -c '. "$1/wt.sh" && wt add --strict <<< feature/b >/dev/null && pwd' _ "$WT"
+	[ "$status" -eq 0 ]
+	[ "${lines[$((${#lines[@]} - 1))]}" -ef "$WT_WORKTREE_REPO_LOCATION/feature_b" ]
+	# Refused, it stays where it was
+	run bash -c 'cd "$2" && . "$1/wt.sh"; wt add --strict feature/typo 2>/dev/null; pwd' _ "$WT" "$BATS_TEST_TMPDIR"
+	[ "${lines[$((${#lines[@]} - 1))]}" -ef "$BATS_TEST_TMPDIR" ]
+}
+
+@test "the wt function doesn't ask for a branch when an option is wrong, but says so at once" {
+	run bash -c '. "$1/wt.sh" && wt add --stirct <<< feature/a' _ "$WT"
+	[ "$status" -eq 1 ]
+	[[ "$output" != *"Branch name: "* ]] || false
+	[[ "$output" == *"wt-add: unknown option --stirct"* ]] || false
+	run bash -c '. "$1/wt.sh" && wt cd --strict <<< feature/a' _ "$WT"
+	[ "$status" -eq 1 ]
+	[[ "$output" != *"Branch name: "* ]] || false
+	[[ "$output" == *"wt-cd: unknown option --strict"* ]] || false
+	[ "$(ls "$WT_WORKTREE_REPO_LOCATION")" = main ]
+}
+
 @test "wt add with no branch asks for one, and stops if none is given" {
 	run bash -c '. "$1/wt.sh" && wt add <<< ""' _ "$WT"
 	[ "$status" -eq 1 ]
@@ -746,6 +824,9 @@ quote_cases() {
 		done' _ "$WT" \
 		'shop-wt cd yourname/TICKET-123/Login-&-Signup-Pages' \
 		'wt add fix(a);b|c' \
+		'shop-wt add --strict a&b' \
+		'wt add --strict' \
+		'wt cd --strict a&b' \
 		'  shop-wt cd a&b  ' \
 		'wt cd feature/plain-name_1.2' \
 		"wt cd 'a&b'" \
@@ -761,6 +842,9 @@ quote_cases() {
 
 QUOTE_EXPECTED="shop-wt cd yourname/TICKET-123/Login-&-Signup-Pages => shop-wt cd 'yourname/TICKET-123/Login-&-Signup-Pages'
 wt add fix(a);b|c => wt add 'fix(a);b|c'
+shop-wt add --strict a&b => shop-wt add --strict 'a&b'
+wt add --strict => unchanged
+wt cd --strict a&b => unchanged
   shop-wt cd a&b   => shop-wt cd 'a&b'
 wt cd feature/plain-name_1.2 => unchanged
 wt cd 'a&b' => unchanged

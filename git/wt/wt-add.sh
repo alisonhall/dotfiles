@@ -12,13 +12,40 @@ fi
 CURRENT_REMOTE_NAME="${CURRENT_REMOTE_NAME:-origin}"
 CURRENT_DEV_BRANCH="${CURRENT_DEV_BRANCH:-main}"
 
-REMOTE_BRANCH_NAME="$1"
+# --strict: only a branch that's on the remote (or a merged PR's head, below) - never a new branch
+# from CURRENT_DEV_BRANCH, for a tool that wants a PR's branch and would otherwise get an empty
+# one. (No branch name starts with -, so anything that does is an option.)
+STRICT=0
+REMOTE_BRANCH_NAME=""
+for arg in "$@"; do
+	case "$arg" in
+		--strict) STRICT=1 ;;
+		-*)
+			echo "wt-add: unknown option $arg" >&2
+			exit 1
+			;;
+		*)
+			if [ -n "$REMOTE_BRANCH_NAME" ]; then
+				echo "Usage: wt-add [--strict] <branch-name>" >&2
+				exit 1
+			fi
+			REMOTE_BRANCH_NAME="$arg"
+			;;
+	esac
+done
 LOCAL_BRANCH_NAME="${REMOTE_BRANCH_NAME//\//_}"
 
 if [ -z "$REMOTE_BRANCH_NAME" ]; then
-	echo "Usage: wt-add <branch-name>"
+	echo "Usage: wt-add [--strict] <branch-name>"
 	exit 1
 fi
+
+# refuse_new_branch <why>: With --strict, stop here, having made nothing.
+refuse_new_branch() {
+	[ "$STRICT" = 1 ] || return 0
+	echo "wt-add: $1 - with --strict, no new branch is made. (Without it, wt add makes '$REMOTE_BRANCH_NAME' from $CURRENT_DEV_BRANCH.)" >&2
+	exit 1
+}
 
 # Anchor all central git operations on the main worktree. The worktree
 # collection folder is NOT itself a git repo in the normal-repo-at-main layout
@@ -53,7 +80,12 @@ fi
 
 # Check whether the branch already exists on the remote. (The full ref: ls-remote matches a
 # pattern against the end of each ref name, so "login" alone would also match feature/login.)
-if [ -n "$(git -C "$MAIN_WT" ls-remote --heads "$CURRENT_REMOTE_NAME" "refs/heads/$REMOTE_BRANCH_NAME")" ]; then
+# A remote that can't be asked looks like one without the branch, so --strict stops there too.
+if ! remote_head="$(git -C "$MAIN_WT" ls-remote --heads "$CURRENT_REMOTE_NAME" "refs/heads/$REMOTE_BRANCH_NAME")"; then
+	refuse_new_branch "couldn't ask $CURRENT_REMOTE_NAME whether it has '$REMOTE_BRANCH_NAME'"
+	remote_head=""
+fi
+if [ -n "$remote_head" ]; then
 	echo "Remote branch '$REMOTE_BRANCH_NAME' found on $CURRENT_REMOTE_NAME. Creating worktree tracking it..."
 	# Fetch the branch so the local remote-tracking ref ($CURRENT_REMOTE_NAME/$REMOTE_BRANCH_NAME)
 	# exists; git worktree add cannot resolve a remote branch that has not been fetched yet.
@@ -82,9 +114,11 @@ else
 			setup_worktree_symlinks
 			exit 0
 		else
+			refuse_new_branch "couldn't fetch refs/pull/$pr_number/head, the head of merged PR #$pr_number"
 			echo "wt-add: failed to fetch refs/pull/$pr_number/head; falling back to new local branch."
 		fi
 	fi
+	refuse_new_branch "branch '$REMOTE_BRANCH_NAME' isn't on $CURRENT_REMOTE_NAME"
 
 	echo "Remote branch '$REMOTE_BRANCH_NAME' not found on $CURRENT_REMOTE_NAME. Creating a new local branch '$REMOTE_BRANCH_NAME' from $CURRENT_DEV_BRANCH..."
 	if git -C "$MAIN_WT" show-ref --verify --quiet "refs/heads/$REMOTE_BRANCH_NAME"; then

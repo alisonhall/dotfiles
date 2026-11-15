@@ -77,14 +77,23 @@ if [ "$_wt_sourced" = "1" ]; then
           echo "  Run \`wt $sub\` on its own and paste the name when it asks, or put the name in single quotes." >&2
           return 1
         fi
-        # With no branch, ask for it: a name pasted at the prompt is read as typed, whereas on
+        # The branch: the argument that isn't an option, like --strict (no branch name starts
+        # with -). With none, ask for it: a name pasted at the prompt is read as typed, whereas on
         # the command line the shell would act on characters like & or ; before wt saw them
-        if [ $# -eq 0 ]; then
-          local branch
+        # An option wt doesn't know is left to the script to refuse, before asking for a branch
+        # that would go unused.
+        local arg branch="" unknown=""
+        for arg in "$@"; do
+          case "$arg" in
+            -*) [ "$sub $arg" = "add --strict" ] || unknown=1 ;;
+            *) branch="$arg" ;;
+          esac
+        done
+        if [ -z "$branch" ] && [ -z "$unknown" ]; then
           printf 'Branch name: ' >&2
           read -r branch || return 1
           [ -n "$branch" ] || { echo "wt $sub: no branch name given" >&2; return 1; }
-          set -- "$branch"
+          set -- "$@" "$branch"
         fi
         # Where the new folder is: beside main when `wt add` is run there (as the dispatch below
         # decides too), else in WT_WORKTREE_REPO_LOCATION
@@ -93,7 +102,7 @@ if [ "$_wt_sourced" = "1" ]; then
           location="${WT_WORKTREE_REPO_LOCATION:-}"
         fi
         bash "$WT_DIR/wt.sh" "$sub" "$@" || return 1
-        cd "$location/${1//\//_}"
+        cd "$location/${branch//\//_}"
         ;;
       *)
         bash "$WT_DIR/wt.sh" "$sub" "$@"
@@ -104,20 +113,24 @@ if [ "$_wt_sourced" = "1" ]; then
   # _wt_quote_branch_arg <line>: For a command line like `wt cd feature/a&b` or `shop-wt add x;y`
   # (wt, or a per-repo <name>-wt command), sets REPLY to the line with the branch name in single
   # quotes, and succeeds. Fails, leaving the line alone, unless there's exactly one name after
-  # cd or add, with a character the shell would act on and no quotes, \ or $ (which mean it's
-  # already quoted, or meant to be expanded). Branch names can't contain spaces, so anything
-  # after a space - like `wt cd x && ls` - is left for the shell, as typed.
+  # cd or add (or add --strict), with a character the shell would act on and no quotes, \ or $
+  # (which mean it's already quoted, or meant to be expanded). Branch names can't contain spaces,
+  # so anything after a space - like `wt cd x && ls` - is left for the shell, as typed.
   _wt_quote_branch_arg() {
-    local cmd sub name extra
+    local cmd sub name extra option=""
     case "$1" in *$'\n'*) return 1 ;; esac
     read -r cmd sub name extra <<< "$1"
+    if [ "$sub" = add ] && [ "$name" = --strict ]; then
+      option=" --strict"
+      read -r name extra <<< "$extra"
+    fi
     [ -n "$name" ] && [ -z "$extra" ] || return 1
     case "$cmd" in wt | ?*-wt) ;; *) return 1 ;; esac
     case "$cmd" in *[!A-Za-z0-9_.-]*) return 1 ;; esac
     case "$sub" in cd | add) ;; *) return 1 ;; esac
     case "$name" in *[\'\"\\\$\`]*) return 1 ;; esac
     case "$name" in *[!A-Za-z0-9._/@+=:,%-]*) ;; *) return 1 ;; esac
-    REPLY="$cmd $sub '$name'"
+    REPLY="$cmd $sub$option '$name'"
   }
 
   # In zsh, quote the branch name as Enter is pressed, before the shell reads the line - so a name
@@ -176,12 +189,16 @@ Usage:
   wt <command> [args...]
 
 Commands:
-  add <branch>            Create a new worktree from a remote branch name,
+  add [--strict] <branch> Create a new worktree from a remote branch name,
                           then cd into it. Recovers squash-merged branches via
                           their PR head when the remote branch is gone.
                           Run in a main folder, it works there, whatever
                           WT_WORKTREE_REPO_LOCATION says (and WT_REPO_SLUG,
                           when the location is another repo's).
+                            --strict   fail, making nothing, when the branch
+                                       isn't on the remote (or it can't be
+                                       asked), rather than making a new
+                                       branch from CURRENT_DEV_BRANCH
   cd <branch>             Go to a worktree, then cd into it. If the worktree
                           does not exist yet, it is created first by running
                           the full `wt add <branch>` (same remote-branch /

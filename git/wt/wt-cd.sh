@@ -14,6 +14,14 @@ CURRENT_REMOTE_NAME="${CURRENT_REMOTE_NAME:-origin}"
 REMOTE_BRANCH_NAME="$1"
 LOCAL_BRANCH_NAME="${REMOTE_BRANCH_NAME//\//_}"
 
+# No options (--strict is wt add's); no branch name starts with -
+case "$REMOTE_BRANCH_NAME" in
+	-*)
+		echo "wt-cd: unknown option $REMOTE_BRANCH_NAME" >&2
+		exit 1
+		;;
+esac
+
 if [ -z "$REMOTE_BRANCH_NAME" ]; then
 	echo "Usage: wt-cd <branch-name>"
 	exit 1
