@@ -58,11 +58,18 @@ export PAGER=cat
 # user-specific is hardcoded here, so the script works for any repo/machine.
 if [[ -z "${WT_WORKTREE_REPO_LOCATION:-}" ]]; then
   echo "error: WT_WORKTREE_REPO_LOCATION is not set." >&2
-  echo "       Export it in local/shell_local.sh (the worktree collection folder, e.g. \$HOME/Sites/fe)." >&2
+  echo "       Export it in local/shell_local.sh (the worktree collection folder, e.g. \$HOME/Sites/fe)," >&2
+  echo "       or run wt in the repo's main folder." >&2
   exit 2
 fi
+# Without WT_REPO_SLUG (as when run in a main folder with no settings, or another repo's), the
+# repo gh says the main folder's clone is
 if [[ -z "${WT_REPO_SLUG:-}" ]]; then
-  echo "error: WT_REPO_SLUG is not set." >&2
+  WT_REPO_SLUG="$(cd "$WT_WORKTREE_REPO_LOCATION/main" 2>/dev/null &&
+    gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null)" || WT_REPO_SLUG=""
+fi
+if [[ -z "${WT_REPO_SLUG:-}" ]]; then
+  echo "error: WT_REPO_SLUG is not set, and gh couldn't tell the repo from the main folder's clone." >&2
   echo "       Export it in local/shell_local.sh (the GitHub repo, e.g. owner/repo)." >&2
   exit 2
 fi

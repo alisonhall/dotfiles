@@ -228,9 +228,11 @@ The commands are written with `wt`. If you made your own command in [step 2](#2-
 
 `<branch>` is always the branch's name as it is on GitHub, like `feature/login`, not its folder name.
 
+Run in `<repo-location>/main`, every command works on that folder's layout whatever your settings say, and needs none: `<repo-location>` is the folder that holds `main`, and, unless `WT_WORKTREE_REPO_LOCATION` already points there, `gh` finds the repo from the clone rather than `WT_REPO_SLUG`. So settings exported for another repo don't send it elsewhere, and a tool that runs `wt` in the clone needs nothing set.
+
 | Command | What it does | Options |
 | --- | --- | --- |
-| `wt add <branch>` | Creates a folder for `<branch>` in `<repo-location>` (for `feature/login`, that's `feature_login/`), and moves your terminal into it. Run in `<repo-location>/main`, it uses that folder's layout whatever your settings say, and needs none: `WT_WORKTREE_REPO_LOCATION` is the folder that holds `main`, and, unless `WT_WORKTREE_REPO_LOCATION` already points there, `gh` finds the repo from the clone rather than `WT_REPO_SLUG`. So settings exported for another repo don't send it elsewhere. If `<branch>` exists on GitHub, the folder tracks it. If not, `wt` creates `<branch>` as a new branch from `main` (or from `CURRENT_DEV_BRANCH`). If the folder already exists, `wt` just moves you into it. | `--strict`: if `<branch>` isn't on GitHub (or GitHub can't be reached), stop with an error and make nothing, rather than a new branch. For a tool checking out a pull request's branch, which wants that branch or nothing. A squash-merged branch is still brought back. |
+| `wt add <branch>` | Creates a folder for `<branch>` in `<repo-location>` (for `feature/login`, that's `feature_login/`), and moves your terminal into it. If `<branch>` exists on GitHub, the folder tracks it. If not, `wt` creates `<branch>` as a new branch from `main` (or from `CURRENT_DEV_BRANCH`). If the folder already exists, `wt` just moves you into it. | `--strict`: if `<branch>` isn't on GitHub (or GitHub can't be reached), stop with an error and make nothing, rather than a new branch: exit code 3 when it isn't on GitHub, 4 when GitHub couldn't be asked. For a tool checking out a pull request's branch, which wants that branch or nothing. A squash-merged branch is still brought back. |
 | `wt cd <branch>` | Moves your terminal into `<branch>`'s folder, and downloads the branch's latest commits from GitHub without changing your files (run `git pull` to apply them). If the folder doesn't exist yet, `wt cd` creates it first, the same way `wt add` does. | |
 | `wt add`, `wt cd` | Without a branch, they ask for its name. Use this for a name with characters your shell treats specially, like `&`, `;`, `(` or `)`: pasted at the prompt, it's used exactly as it is, whereas on the command line `wt cd fix-a&b` would run `wt cd fix-a` in the background and then a command called `b`. (Single quotes work too: `wt cd 'fix-a&b'`.) In zsh you don't need either: when you press Enter on a line like `wt cd fix-a&b`, `wt add --strict fix-a&b` or `<repo-name>-wt cd fix-a&b`, `wt` puts the branch name in single quotes first (you'll see them in your history). It leaves the line alone if the name already has quotes, `\` or `$` in it, or if anything follows it after a space, like `&& ls`. In bash, which doesn't do that, `wt cd fix-a&b` runs `wt cd fix-a` in the background, and `wt` stops there and tells you to use the prompt or quotes, rather than making a `fix-a` branch. | |
 | `wt main` | Moves your terminal into `<repo-location>/main`. | |
@@ -274,8 +276,8 @@ Open a new terminal after changing either file.
 
 | Setting | Needed? | Default | What it's for |
 | --- | --- | --- | --- |
-| `WT_WORKTREE_REPO_LOCATION` | Except for `wt add` run in `main` | | `<repo-location>`: the folder that contains `main/` (see [step C](#c-set-up-the-repos-folder)) |
-| `WT_REPO_SLUG` | For `wt clean` | | `<repo-owner>/<repo-name>`: the GitHub repo's owner and name |
+| `WT_WORKTREE_REPO_LOCATION` | Except when run in `main` | | `<repo-location>`: the folder that contains `main/` (see [step C](#c-set-up-the-repos-folder)) |
+| `WT_REPO_SLUG` | For `wt clean`, when `gh` can't tell it from `main`'s clone (one with several remotes) | | `<repo-owner>/<repo-name>`: the GitHub repo's owner and name |
 | `CURRENT_DEV_BRANCH` | No | `main` | The branch that `wt add` starts new branches from, and that the `main` folder holds (`wt ls` warns if it holds another) |
 | `CURRENT_REMOTE_NAME` | No | `origin` | The git remote that points at GitHub |
 | `WT_PROTECTED_BRANCHES` | No | `main` | Branches `wt clean` never deletes, separated by spaces, like `"main release"`. `CURRENT_DEV_BRANCH` is always protected too |

@@ -36,6 +36,11 @@ setup() {
 		#!/usr/bin/env bash
 		case "$1 $2" in
 			"auth status") exit 0 ;;
+			# The repo of the clone it's run in, like the real gh; outside a clone it can't tell
+			"repo view")
+				git rev-parse --git-dir >/dev/null 2>&1 || exit 1
+				echo acme/shop
+				;;
 			"pr list")
 				repo="" state="" head=""
 				while [ $# -gt 0 ]; do
@@ -611,7 +616,8 @@ deleted_after_merge() {
 
 @test "wt add --strict makes nothing for a branch that isn't on GitHub" {
 	run bash "$WT/wt.sh" add --strict feature/typo
-	[ "$status" -eq 1 ]
+	# 3: not on the remote, as against 4: couldn't find out
+	[ "$status" -eq 3 ]
 	[[ "$output" == *"branch 'feature/typo' isn't on origin - with --strict, no new branch is made"* ]] || false
 	[ "$(ls "$WT_WORKTREE_REPO_LOCATION")" = main ]
 	run git -C "$MAIN" show-ref --verify --quiet refs/heads/feature/typo
@@ -639,7 +645,7 @@ deleted_after_merge() {
 @test "wt add --strict makes nothing when the merged pull request's head can't be fetched" {
 	export FAKE_MERGED_PRS="feature/gone=7"
 	run bash "$WT/wt.sh" add --strict feature/gone
-	[ "$status" -eq 1 ]
+	[ "$status" -eq 4 ]
 	[[ "$output" == *"couldn't fetch refs/pull/7/head"* ]] || false
 	[ "$(ls "$WT_WORKTREE_REPO_LOCATION")" = main ]
 }
@@ -647,7 +653,7 @@ deleted_after_merge() {
 @test "wt add --strict makes nothing when GitHub can't be asked" {
 	git -C "$MAIN" remote set-url origin "$BATS_TEST_TMPDIR/nowhere.git"
 	run bash "$WT/wt.sh" add --strict feature/a
-	[ "$status" -eq 1 ]
+	[ "$status" -eq 4 ]
 	[[ "$output" == *"couldn't ask origin whether it has 'feature/a'"* ]] || false
 	[ "$(ls "$WT_WORKTREE_REPO_LOCATION")" = main ]
 }
@@ -699,6 +705,45 @@ deleted_after_merge() {
 	run bash "$WT/wt.sh" add feature/gone
 	[ "$status" -eq 0 ]
 	[ "$(git -C "$WT_WORKTREE_REPO_LOCATION/feature_gone" rev-parse HEAD)" = "$sha" ]
+}
+
+@test "wt ls, link, clean and rm run in the main folder work on its layout, whatever the settings say" {
+	git -C "$MAIN" push -q origin main:refs/heads/feature/x 2>/dev/null
+	bash "$WT/wt.sh" add feature/x >/dev/null 2>&1
+	export WT_WORKTREE_REPO_LOCATION="$BATS_TEST_TMPDIR/other"
+	unset WT_REPO_SLUG
+	cd "$MAIN"
+	run bash "$WT/wt.sh" ls --no-fetch
+	[ "$status" -eq 0 ]
+	[[ "$output" == *feature_x* ]] || false
+	run bash "$WT/wt.sh" link --check --all --no-workspaces
+	[ "$status" -eq 0 ]
+	[[ "$output" == *feature_x* ]] || false
+	# wt clean needs the repo: gh tells it from main's clone
+	run bash "$WT/wt.sh" clean
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"repo: acme/shop"* ]] || false
+	[ -d "$BATS_TEST_TMPDIR/repo/feature_x" ]
+	run bash "$WT/wt.sh" rm feature/x
+	[ "$status" -eq 0 ]
+	[ ! -e "$BATS_TEST_TMPDIR/repo/feature_x" ]
+	[ ! -e "$BATS_TEST_TMPDIR/other" ]
+}
+
+@test "wt clean without WT_REPO_SLUG says so when gh can't tell the repo either" {
+	unset WT_REPO_SLUG
+	printf '#!/usr/bin/env bash\n[ "$1 $2" = "auth status" ]\n' > "$BATS_TEST_TMPDIR/bin/gh"
+	run bash "$WT/wt.sh" clean
+	[ "$status" -eq 2 ]
+	[[ "$output" == *"WT_REPO_SLUG is not set, and gh couldn't tell the repo"* ]] || false
+}
+
+@test "the wt function's cd and main go to the main folder's layout, whatever the settings say" {
+	git -C "$MAIN" push -q origin main:refs/heads/feature/x 2>/dev/null
+	run bash -c 'export WT_WORKTREE_REPO_LOCATION="$2/other"; cd "$3" && . "$1/wt.sh" && wt main && echo "main at:$PWD" && wt cd feature/x >/dev/null 2>&1 && echo "cd at:$PWD"' _ "$WT" "$BATS_TEST_TMPDIR" "$MAIN"
+	[ "$status" -eq 0 ]
+	[ "$(printf '%s\n' "$output" | sed -n 's/^main at://p')" -ef "$MAIN" ]
+	[ "$(printf '%s\n' "$output" | sed -n 's/^cd at://p')" -ef "$BATS_TEST_TMPDIR/repo/feature_x" ]
 }
 
 @test "wt add needs no settings in the main folder" {
@@ -782,9 +827,17 @@ deleted_after_merge() {
 	run bash -c '. "$1/wt.sh" && wt add --strict <<< feature/b >/dev/null && pwd' _ "$WT"
 	[ "$status" -eq 0 ]
 	[ "${lines[$((${#lines[@]} - 1))]}" -ef "$WT_WORKTREE_REPO_LOCATION/feature_b" ]
-	# Refused, it stays where it was
-	run bash -c 'cd "$2" && . "$1/wt.sh"; wt add --strict feature/typo 2>/dev/null; pwd' _ "$WT" "$BATS_TEST_TMPDIR"
+	# Refused, it stays where it was, and gives the script's exit code (3: not on the remote), as a
+	# tool running it in an interactive shell gets the function, not the script
+	run bash -c 'cd "$2" && . "$1/wt.sh"; wt add --strict feature/typo 2>/dev/null; echo "status:$?"; pwd' _ "$WT" "$BATS_TEST_TMPDIR"
+	[ "${lines[$((${#lines[@]} - 2))]}" = "status:3" ]
 	[ "${lines[$((${#lines[@]} - 1))]}" -ef "$BATS_TEST_TMPDIR" ]
+}
+
+@test "zsh's wt gives the script's exit code too" {
+	command -v zsh >/dev/null 2>&1 || skip "zsh isn't installed"
+	run zsh -f -c 'cd "$2" && source "$1/wt.sh"; wt add --strict feature/typo 2>/dev/null; echo "status:$?"' _ "$WT" "$BATS_TEST_TMPDIR"
+	[ "${lines[$((${#lines[@]} - 1))]}" = "status:3" ]
 }
 
 @test "the wt function doesn't ask for a branch when an option is wrong, but says so at once" {
