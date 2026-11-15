@@ -36,6 +36,19 @@ else
   WT_DIR="$(cd "$(dirname "$0")" && pwd)"
 fi
 
+# _wt_main_location: Run in the main folder of wt's layout - a folder named main that's the top
+# of its git worktree, in either layout - prints the folder that holds it, and succeeds. Then
+# `wt add` works there with no settings, and isn't sent elsewhere by a WT_WORKTREE_REPO_LOCATION
+# or WT_REPO_SLUG exported for another repo. (Defined in both modes: the function cds with it,
+# the dispatch passes it on. Written for bash 3.2 and zsh alike.)
+_wt_main_location() {
+  local top
+  [ "${PWD##*/}" = main ] || return 1
+  top="$(git rev-parse --show-toplevel 2>/dev/null)" || return 1
+  [ -n "$top" ] && [ "$top" -ef "$PWD" ] || return 1
+  dirname "$PWD"
+}
+
 # --- sourced: define the interactive `wt` function, then stop ---
 if [ "$_wt_sourced" = "1" ]; then
   unset _wt_sourced
@@ -73,8 +86,14 @@ if [ "$_wt_sourced" = "1" ]; then
           [ -n "$branch" ] || { echo "wt $sub: no branch name given" >&2; return 1; }
           set -- "$branch"
         fi
+        # Where the new folder is: beside main when `wt add` is run there (as the dispatch below
+        # decides too), else in WT_WORKTREE_REPO_LOCATION
+        local location
+        if [ "$sub" != add ] || ! location="$(_wt_main_location)"; then
+          location="${WT_WORKTREE_REPO_LOCATION:-}"
+        fi
         bash "$WT_DIR/wt.sh" "$sub" "$@" || return 1
-        cd "$WT_WORKTREE_REPO_LOCATION/${1//\//_}"
+        cd "$location/${1//\//_}"
         ;;
       *)
         bash "$WT_DIR/wt.sh" "$sub" "$@"
@@ -132,7 +151,16 @@ sub="${1:-help}"
 run() { exec bash "$WT_DIR/$1" "${@:2}"; }
 
 case "$sub" in
-  add)   run wt-add.sh   "${@:2}" ;;
+  add)
+    # Run in a main folder: that layout, whatever the settings say. When they're another repo's
+    # (or not set), gh finds the repo from main's clone rather than from WT_REPO_SLUG; when they're
+    # this one's, the slug is kept, as gh can't tell which repo a clone with several remotes is.
+    if location="$(_wt_main_location)"; then
+      [ "${WT_WORKTREE_REPO_LOCATION:-}" -ef "$location" ] || unset WT_REPO_SLUG
+      export WT_WORKTREE_REPO_LOCATION="$location"
+    fi
+    run wt-add.sh "${@:2}"
+    ;;
   cd)    run wt-cd.sh    "${@:2}" ;;
   rm)    run wt-rm.sh    "${@:2}" ;;
   ls)    run wt-ls.sh    "${@:2}" ;;
@@ -151,6 +179,9 @@ Commands:
   add <branch>            Create a new worktree from a remote branch name,
                           then cd into it. Recovers squash-merged branches via
                           their PR head when the remote branch is gone.
+                          Run in a main folder, it works there, whatever
+                          WT_WORKTREE_REPO_LOCATION says (and WT_REPO_SLUG,
+                          when the location is another repo's).
   cd <branch>             Go to a worktree, then cd into it. If the worktree
                           does not exist yet, it is created first by running
                           the full `wt add <branch>` (same remote-branch /

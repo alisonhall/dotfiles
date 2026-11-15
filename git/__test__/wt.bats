@@ -50,6 +50,13 @@ setup() {
 					echo "failed to run git: fatal: not a git repository" >&2
 					exit 1
 				fi
+				# Another repo has none of these pull requests
+				[ -n "$repo" ] && [ "$repo" != acme/shop ] && exit 0
+				# FAKE_GH_NEEDS_REPO: as for a clone with several remotes and no default set
+				if [ -z "$repo" ] && [ -n "${FAKE_GH_NEEDS_REPO:-}" ]; then
+					echo "multiple remotes detected; please run gh repo set-default" >&2
+					exit 1
+				fi
 				if [ "$state" = merged ]; then
 					for pr in ${FAKE_MERGED_PRS:-}; do
 						[ "${pr%%=*}" = "$head" ] && printf '%s\t%s\n' "${pr#*=}" "$head"
@@ -615,9 +622,71 @@ deleted_after_merge() {
 	[ "$status" -eq 0 ]
 }
 
+@test "wt add run in the main folder puts the branch folder beside it, whatever the settings say" {
+	sha="$(deleted_after_merge feature/gone 7)"
+	export FAKE_MERGED_PRS="feature/gone=7"
+	# Settings exported for another repo, as an rc file might
+	export WT_WORKTREE_REPO_LOCATION="$BATS_TEST_TMPDIR/other"
+	export WT_REPO_SLUG=acme/other
+	cd "$MAIN"
+	run bash "$WT/wt.sh" add feature/new
+	[ "$status" -eq 0 ]
+	[ "$(git -C "$BATS_TEST_TMPDIR/repo/feature_new" branch --show-current)" = feature/new ]
+	[ ! -e "$BATS_TEST_TMPDIR/other" ]
+	# gh is asked about main's clone, not the other repo
+	run bash "$WT/wt.sh" add feature/gone
+	[ "$status" -eq 0 ]
+	[ "$(git -C "$BATS_TEST_TMPDIR/repo/feature_gone" rev-parse HEAD)" = "$sha" ]
+}
+
+@test "wt add in the main folder keeps WT_REPO_SLUG when the settings are this repo's" {
+	sha="$(deleted_after_merge feature/gone 7)"
+	export FAKE_MERGED_PRS="feature/gone=7" FAKE_GH_NEEDS_REPO=1
+	cd "$MAIN"
+	run bash "$WT/wt.sh" add feature/gone
+	[ "$status" -eq 0 ]
+	[ "$(git -C "$WT_WORKTREE_REPO_LOCATION/feature_gone" rev-parse HEAD)" = "$sha" ]
+}
+
+@test "wt add needs no settings in the main folder" {
+	unset WT_WORKTREE_REPO_LOCATION WT_REPO_SLUG
+	cd "$MAIN"
+	run bash "$WT/wt.sh" add feature/new
+	[ "$status" -eq 0 ]
+	[ -e "$BATS_TEST_TMPDIR/repo/feature_new/.git" ]
+	# Elsewhere it still needs them, and says where it works without
+	cd "$BATS_TEST_TMPDIR"
+	run bash "$WT/wt.sh" add feature/other
+	[ "$status" -eq 2 ]
+	[[ "$output" == *"or run wt add in the repo's main folder"* ]] || false
+}
+
+@test "a folder named main that isn't a worktree's top doesn't count as the main folder" {
+	bash "$WT/wt.sh" add feature/x >/dev/null 2>&1
+	mkdir "$WT_WORKTREE_REPO_LOCATION/feature_x/main"
+	cd "$WT_WORKTREE_REPO_LOCATION/feature_x/main"
+	run bash "$WT/wt.sh" add feature/y
+	[ "$status" -eq 0 ]
+	[ -e "$WT_WORKTREE_REPO_LOCATION/feature_y/.git" ]
+	[ ! -e "$WT_WORKTREE_REPO_LOCATION/feature_x/feature_y" ]
+}
+
 #   -------------------------------
 #   THE WT FUNCTION
 #   -------------------------------
+
+@test "the wt function moves into the folder wt add made beside main, not the settings' location" {
+	run bash -c 'export WT_WORKTREE_REPO_LOCATION="$2/other"; cd "$3" && . "$1/wt.sh" && wt add feature/new >/dev/null && pwd' _ "$WT" "$BATS_TEST_TMPDIR" "$MAIN"
+	[ "$status" -eq 0 ]
+	[ "${lines[$((${#lines[@]} - 1))]}" -ef "$BATS_TEST_TMPDIR/repo/feature_new" ]
+}
+
+@test "zsh's wt does the same" {
+	command -v zsh >/dev/null 2>&1 || skip "zsh isn't installed"
+	run zsh -f -c 'export WT_WORKTREE_REPO_LOCATION="$2/other"; cd "$3" && source "$1/wt.sh" && wt add feature/new >/dev/null && pwd' _ "$WT" "$BATS_TEST_TMPDIR" "$MAIN"
+	[ "$status" -eq 0 ]
+	[ "${lines[$((${#lines[@]} - 1))]}" -ef "$BATS_TEST_TMPDIR/repo/feature_new" ]
+}
 
 @test "wt main says so when WT_WORKTREE_REPO_LOCATION isn't set" {
 	run bash -c 'unset WT_WORKTREE_REPO_LOCATION; . "$1/wt.sh" && wt main' _ "$WT"
