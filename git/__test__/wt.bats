@@ -903,7 +903,8 @@ deleted_after_merge() {
 	[[ "$output" == *"GONE"*"pr-13"* ]] || false
 	[[ "$output" == *"KEEP"*"pr-14"*"open PR #14"* ]] || false
 	[ ! -e "$WT_WORKTREE_REPO_LOCATION/pr-13" ]
-	! git -C "$MAIN" show-ref --verify --quiet refs/heads/pr-13
+	run git -C "$MAIN" show-ref --verify --quiet refs/heads/pr-13
+	[ "$status" -ne 0 ]
 	[ -d "$WT_WORKTREE_REPO_LOCATION/pr-14" ]
 }
 
@@ -1236,6 +1237,114 @@ ls => unchanged"
 	[ "$status" -eq 0 ]
 	[ "${lines[0]}" = "wt: function" ]
 	[ "${lines[1]}" -ef "$WT" ]
+}
+
+@test "wt link with no branch fixes the branch folder it's run in, with nothing set" {
+	bash "$WT/wt.sh" add feature/x >/dev/null 2>&1
+	folder="$WT_WORKTREE_REPO_LOCATION/feature_x"
+	rm "$folder/node_modules"
+	unset WT_WORKTREE_REPO_LOCATION WT_REPO_SLUG
+	mkdir -p "$folder/src"
+	cd "$folder/src"
+	run bash "$WT/wt.sh" link --no-workspaces
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"Worktree: feature_x"* ]] || false
+	[ "$folder/node_modules" -ef "$MAIN/node_modules" ]
+}
+
+@test "wt link given a branch's folder fixes it, from anywhere and with nothing set" {
+	bash "$WT/wt.sh" add feature/x >/dev/null 2>&1
+	bash "$WT/wt.sh" add feature/y >/dev/null 2>&1
+	folder="$WT_WORKTREE_REPO_LOCATION/feature_x"
+	rm "$folder/node_modules" "$WT_WORKTREE_REPO_LOCATION/feature_y/node_modules"
+	export WT_WORKTREE_REPO_LOCATION="$BATS_TEST_TMPDIR/other"
+	unset WT_REPO_SLUG
+	cd "$BATS_TEST_TMPDIR"
+	run bash "$WT/wt.sh" link --no-workspaces "$folder"
+	[ "$status" -eq 0 ]
+	[ "$folder/node_modules" -ef "$MAIN/node_modules" ]
+	# Only that one
+	[ ! -e "$BATS_TEST_TMPDIR/repo/feature_y/node_modules" ]
+	# And as .
+	cd "$BATS_TEST_TMPDIR/repo/feature_y"
+	run bash "$WT/wt.sh" link --no-workspaces .
+	[ "$status" -eq 0 ]
+	[ "$BATS_TEST_TMPDIR/repo/feature_y/node_modules" -ef "$MAIN/node_modules" ]
+}
+
+@test "wt link says so for the main folder, or a folder that isn't a branch's" {
+	cd "$MAIN"
+	run bash "$WT/wt.sh" link --no-workspaces
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"this is the main folder, which the links point at"* ]] || false
+	cd "$BATS_TEST_TMPDIR"
+	run bash "$WT/wt.sh" link --no-workspaces "$MAIN"
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"is the main folder, which the links point at"* ]] || false
+	mkdir "$BATS_TEST_TMPDIR/elsewhere"
+	run bash "$WT/wt.sh" link --no-workspaces "$BATS_TEST_TMPDIR/elsewhere"
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"isn't a branch's folder beside"* ]] || false
+	# With nothing set, that's still what it says, not that the location isn't set
+	unset WT_WORKTREE_REPO_LOCATION
+	run bash "$WT/wt.sh" link --no-workspaces "$BATS_TEST_TMPDIR/elsewhere"
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"isn't a branch's folder beside a main folder of the same repo"* ]] || false
+	[[ "$output" != *"is not set"* ]] || false
+}
+
+@test "wt link -h works with nothing set, outside any layout" {
+	unset WT_WORKTREE_REPO_LOCATION
+	cd "$BATS_TEST_TMPDIR"
+	run bash "$WT/wt.sh" link -h
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"Usage:"* ]] || false
+	[[ "$output" == *"wt-link <folder>"* ]] || false
+}
+
+@test "the commands run in a branch's folder work on its layout, whatever the settings say" {
+	git -C "$MAIN" push -q origin main:refs/heads/feature/x 2>/dev/null
+	bash "$WT/wt.sh" add feature/x >/dev/null 2>&1
+	export WT_WORKTREE_REPO_LOCATION="$BATS_TEST_TMPDIR/other"
+	unset WT_REPO_SLUG
+	mkdir -p "$BATS_TEST_TMPDIR/repo/feature_x/src"
+	cd "$BATS_TEST_TMPDIR/repo/feature_x/src"
+	run bash "$WT/wt.sh" add feature/y
+	[ "$status" -eq 0 ]
+	[ -e "$BATS_TEST_TMPDIR/repo/feature_y/.git" ]
+	run bash "$WT/wt.sh" ls --no-fetch
+	[ "$status" -eq 0 ]
+	[[ "$output" == *feature_y* ]] || false
+	[ ! -e "$BATS_TEST_TMPDIR/other" ]
+	# The function's wt main goes to its main
+	run bash -c '. "$1/wt.sh" && wt main && echo "main at:$PWD"' _ "$WT"
+	[ "$status" -eq 0 ]
+	[ "$(printf '%s\n' "$output" | sed -n 's/^main at://p')" -ef "$MAIN" ]
+}
+
+@test "the commands work in the bare-repo layout's branch folders too" {
+	# fe/.bare with fe/main and fe/feature_x as its worktrees
+	bare="$BATS_TEST_TMPDIR/fe"
+	git clone -q --bare "$BATS_TEST_TMPDIR/origin.git" "$bare/.bare" 2>/dev/null
+	git -C "$bare/.bare" worktree add -q "$bare/main" main 2>/dev/null
+	git -C "$bare/.bare" worktree add -q -b feature/x "$bare/feature_x" main 2>/dev/null
+	unset WT_WORKTREE_REPO_LOCATION WT_REPO_SLUG
+	cd "$bare/feature_x"
+	run bash "$WT/wt.sh" ls --no-fetch
+	[ "$status" -eq 0 ]
+	[[ "$output" == *feature_x* ]] || false
+	[[ "$output" == *"2 worktree(s)"* ]] || false
+}
+
+@test "a branch folder beside another repo's main folder doesn't count as its layout" {
+	git init -q "$BATS_TEST_TMPDIR/mixed/main"
+	git -C "$BATS_TEST_TMPDIR/mixed/main" commit -q --allow-empty -m other
+	git clone -q "$BATS_TEST_TMPDIR/origin.git" "$BATS_TEST_TMPDIR/mixed/shop" 2>/dev/null
+	unset WT_WORKTREE_REPO_LOCATION
+	cd "$BATS_TEST_TMPDIR/mixed/shop"
+	run bash "$WT/wt.sh" ls --no-fetch
+	[ "$status" -eq 2 ]
+	[[ "$output" == *"WT_WORKTREE_REPO_LOCATION is not set"* ]] || false
 }
 
 @test "wt link --all leaves out the main folder, whatever branch it holds" {

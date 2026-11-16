@@ -7,7 +7,9 @@
 # source (via link-workspaces.mjs).
 #
 # Usage:
+#   wt-link                   check & fix the worktree it's run in
 #   wt-link <branch>          check & fix one worktree
+#   wt-link <folder>          check & fix the worktree in that folder (like .)
 #   wt-link --all             check & fix every worktree (except main)
 #   wt-link --check <branch>  check only, make no changes
 #   wt-link --check --all     check only, every worktree
@@ -30,17 +32,6 @@
 
 set -uo pipefail
 
-if [ -z "${WT_WORKTREE_REPO_LOCATION:-}" ]; then
-	echo "error: WT_WORKTREE_REPO_LOCATION is not set." >&2
-	echo "       Export it in local/shell_local.sh (the worktree collection folder, e.g. \$HOME/Sites/fe)," >&2
-	echo "       or run wt in the repo's main folder." >&2
-	exit 2
-fi
-REPO_ROOT="$WT_WORKTREE_REPO_LOCATION"
-
-# Shared symlink target list (worktree_symlink_pairs).
-source "$(cd "$(dirname "$0")" && pwd)/wt-common.sh"
-
 CHECK_ONLY=0
 ALL=0
 NO_WORKSPACES=0
@@ -52,7 +43,7 @@ while [ $# -gt 0 ]; do
 		--all) ALL=1 ;;
 		--no-workspaces) NO_WORKSPACES=1 ;;
 		-h|--help)
-			sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
+			sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'
 			exit 0
 			;;
 		-*)
@@ -70,6 +61,23 @@ while [ $# -gt 0 ]; do
 	shift
 done
 
+# (After the options, so -h works anywhere.) Given a folder, wt finds the layout from it - so
+# without a location here, the folder isn't in one.
+if [ -z "${WT_WORKTREE_REPO_LOCATION:-}" ]; then
+	if [ -n "$BRANCH" ] && [ -d "$BRANCH" ]; then
+		echo "wt-link: $BRANCH isn't a branch's folder beside a main folder of the same repo." >&2
+		exit 1
+	fi
+	echo "error: WT_WORKTREE_REPO_LOCATION is not set." >&2
+	echo "       Export it in local/shell_local.sh (the worktree collection folder, e.g. \$HOME/Sites/fe)," >&2
+	echo "       or run wt in the repo's main folder, or a branch's folder beside it." >&2
+	exit 2
+fi
+REPO_ROOT="$WT_WORKTREE_REPO_LOCATION"
+
+# Shared symlink target list (worktree_symlink_pairs).
+source "$(cd "$(dirname "$0")" && pwd)/wt-common.sh"
+
 # The main worktree must be a valid git worktree. This works in BOTH layouts:
 # the bare-repo layout (fe/.bare + fe/main worktree) and the normal-repo-at-main
 # layout (fe/main/.git). The collection folder itself is not a git repo in the
@@ -82,9 +90,38 @@ REPO_ROOT="$(cd "$REPO_ROOT" && pwd -P)"
 # Anchor for central git ops (see the check above).
 MAIN_WT="$REPO_ROOT/main"
 
+# in_layout <folder>: If <folder> is in a branch folder of this layout (beside main, not main),
+# prints that worktree's top folder and succeeds.
+in_layout() {
+	local top
+	top="$(git -C "$1" rev-parse --show-toplevel 2>/dev/null)" || return 1
+	[ -n "$top" ] && [ "$(dirname "$top")" -ef "$REPO_ROOT" ] && ! [ "$top" -ef "$MAIN_WT" ] || return 1
+	# As the layout names it (git may write it differently, like C:/... on Windows)
+	printf "%s" "$REPO_ROOT/$(basename "$top")"
+}
+
+# Without a branch, the worktree it's run in. Given a folder rather than a branch (a branch's folder
+# name is never a branch name with a / in it, and . or a path is never a branch), that worktree.
+FOLDER=""
 if [ "$ALL" -eq 0 ] && [ -z "$BRANCH" ]; then
-	echo "Usage: wt-link <branch> | --all   (add --check to only inspect)"
-	exit 1
+	if ! FOLDER="$(in_layout "$PWD")"; then
+		if [ "$(git rev-parse --show-toplevel 2>/dev/null)" -ef "$MAIN_WT" ]; then
+			echo "wt-link: this is the main folder, which the links point at. Run it in a branch's folder, or name one." >&2
+		else
+			echo "Usage: wt-link [<branch> | <folder> | --all]   (add --check to only inspect)" >&2
+			echo "       Without a branch or folder, run it in a branch's folder beside $MAIN_WT." >&2
+		fi
+		exit 1
+	fi
+elif [ -n "$BRANCH" ] && [ -d "$BRANCH" ]; then
+	if ! FOLDER="$(in_layout "$BRANCH")"; then
+		if [ "$(git -C "$BRANCH" rev-parse --show-toplevel 2>/dev/null)" -ef "$MAIN_WT" ]; then
+			echo "wt-link: $BRANCH is the main folder, which the links point at." >&2
+		else
+			echo "wt-link: $BRANCH isn't a branch's folder beside $MAIN_WT." >&2
+		fi
+		exit 1
+	fi
 fi
 
 # --- collect the worktrees to process ---------------------------------------
@@ -107,6 +144,8 @@ if [ "$ALL" -eq 1 ]; then
 				;;
 		esac
 	done < <(git -C "$MAIN_WT" worktree list --porcelain 2>/dev/null)
+elif [ -n "$FOLDER" ]; then
+	targets+=("$FOLDER")
 else
 	local_branch="${BRANCH//\//_}"
 	targets+=("$REPO_ROOT/$local_branch")

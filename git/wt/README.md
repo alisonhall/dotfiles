@@ -228,7 +228,7 @@ The commands are written with `wt`. If you made your own command in [step 2](#2-
 
 `<branch>` is always the branch's name as it is on GitHub, like `feature/login`, not its folder name.
 
-Run in `<repo-location>/main`, every command works on that folder's layout whatever your settings say, and needs none: `<repo-location>` is the folder that holds `main`, and, unless `WT_WORKTREE_REPO_LOCATION` already points there, `gh` finds the repo from the clone rather than `WT_REPO_SLUG`. So settings exported for another repo don't send it elsewhere, and a tool that runs `wt` in the clone needs nothing set.
+Run anywhere in `<repo-location>/main` or a branch's folder beside it, every command works on that layout whatever your settings say, and needs none: `<repo-location>` is the folder that holds `main` (a folder beside a `main` of another repo doesn't count), and, unless `WT_WORKTREE_REPO_LOCATION` already points there, `gh` finds the repo from the clone rather than `WT_REPO_SLUG`. So settings exported for another repo don't send it elsewhere, and a tool that runs `wt` in the clone needs nothing set.
 
 | Command | What it does | Options |
 | --- | --- | --- |
@@ -241,7 +241,7 @@ Run in `<repo-location>/main`, every command works on that folder's layout whate
 | `wt ls` | Lists every branch folder with its branch, whether that branch still exists on GitHub (for a `pr-<number>` folder, its pull request), whether the folder has uncommitted or untracked changes, and how many commits the branch is ahead of or behind GitHub. Changes nothing. | `--no-fetch`: skip checking GitHub first. Faster, and works offline, but the ahead/behind numbers may be out of date |
 | `wt clean` | Lists the branch folders that are safe to delete: their pull request (for a `pr-<number>` folder, pull request `<number>`) is merged or closed, and they have no work that isn't on GitHub. Deletes nothing unless you add `--apply`. See [what `wt clean` keeps](#what-wt-clean-keeps). | `--apply`: delete those folders and their local branches<br>`--keep-branch`: with `--apply`, delete the folders but keep the local branches<br>`--older-than 30d`: only folders whose last commit is older than 30 days (also `12h`, `4w`, `90m` for minutes) |
 | `wt rm <branch>` | Deletes `<branch>`'s folder right away. **It doesn't check for uncommitted changes, so anything in that folder that isn't committed is lost.** The branch itself is kept. If you've already deleted the folder yourself, it removes git's record of it. It won't delete the `main` folder, which holds the repo itself. `wt clean` is the safe way to tidy up. | |
-| `wt link <branch>`<br>`wt link --all` | Checks that a branch folder's shared links (to `node_modules`, and to anything in `WT_SYMLINK_PAIRS`) point into `main`, and repairs any that are missing or broken. Give one branch, or `--all` for every branch folder. See [Shared files](#shared-files-node_modules-env). | `--check`: report problems, but don't repair them<br>`--no-workspaces`: skip the [Node workspace](#node-projects) links (faster) |
+| `wt link <branch>`<br>`wt link <folder>`<br>`wt link`<br>`wt link --all` | Checks that a branch folder's shared links (to `node_modules`, and to anything in `WT_SYMLINK_PAIRS`) point into `main`, and repairs any that are missing or broken. Give one branch, a branch folder (like `.`, or its full path, which works from anywhere), nothing to mean the branch folder you're in, or `--all` for every branch folder. See [Shared files](#shared-files-node_modules-env). | `--check`: report problems, but don't repair them<br>`--no-workspaces`: skip the [Node workspace](#node-projects) links (faster) |
 | `wt help` | Lists the commands, options and settings. | |
 
 ### What `wt clean` keeps
@@ -278,7 +278,7 @@ Open a new terminal after changing either file.
 
 | Setting | Needed? | Default | What it's for |
 | --- | --- | --- | --- |
-| `WT_WORKTREE_REPO_LOCATION` | Except when run in `main` | | `<repo-location>`: the folder that contains `main/` (see [step C](#c-set-up-the-repos-folder)) |
+| `WT_WORKTREE_REPO_LOCATION` | Except when run in `main` or a branch's folder | | `<repo-location>`: the folder that contains `main/` (see [step C](#c-set-up-the-repos-folder)) |
 | `WT_REPO_SLUG` | For `wt clean`, when `gh` can't tell it from `main`'s clone (one with several remotes) | | `<repo-owner>/<repo-name>`: the GitHub repo's owner and name |
 | `CURRENT_DEV_BRANCH` | No | `main` | The branch that `wt add` starts new branches from, and that the `main` folder holds (`wt ls` warns if it holds another) |
 | `CURRENT_REMOTE_NAME` | No | `origin` | The git remote that points at GitHub |

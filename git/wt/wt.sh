@@ -36,17 +36,26 @@ else
   WT_DIR="$(cd "$(dirname "$0")" && pwd)"
 fi
 
-# _wt_main_location: Run in the main folder of wt's layout - a folder named main that's the top
-# of its git worktree, in either layout - prints the folder that holds it, and succeeds. Then
-# the commands work there with no settings, and aren't sent elsewhere by a
-# WT_WORKTREE_REPO_LOCATION or WT_REPO_SLUG exported for another repo. (Defined in both modes:
-# the function cds with it, the dispatch passes it on. Written for bash 3.2 and zsh alike.)
-_wt_main_location() {
-  local top
-  [ "${PWD##*/}" = main ] || return 1
-  top="$(git rev-parse --show-toplevel 2>/dev/null)" || return 1
-  [ -n "$top" ] && [ "$top" -ef "$PWD" ] || return 1
-  dirname "$PWD"
+# _wt_layout_location [<folder>]: Run in (or given) a folder of wt's layout - anywhere in main or
+# in a branch folder beside it, in either layout - prints the folder that holds them, and
+# succeeds. A worktree is in the layout when the folder beside it named main is a worktree of the
+# same repo (main itself too). Then the commands work there with no settings, and aren't sent
+# elsewhere by a WT_WORKTREE_REPO_LOCATION or WT_REPO_SLUG exported for another repo. (Defined in
+# both modes: the function cds with it, the dispatch passes it on. Written for bash 3.2 and zsh
+# alike; no cd, which in an interactive zsh may run hooks that print.)
+_wt_layout_location() {
+  local folder="${1:-$PWD}" top parent common main_common
+  top="$(git -C "$folder" rev-parse --show-toplevel 2>/dev/null)" || return 1
+  [ -n "$top" ] || return 1
+  parent="$(dirname "$top")"
+  [ -e "$parent/main/.git" ] || return 1
+  common="$(git -C "$folder" rev-parse --git-common-dir 2>/dev/null)" || return 1
+  main_common="$(git -C "$parent/main" rev-parse --git-common-dir 2>/dev/null)" || return 1
+  # Relative to the folder git ran in, unless absolute (C:/... from Windows' git too)
+  case "$common" in /* | [A-Za-z]:*) ;; *) common="$folder/$common" ;; esac
+  case "$main_common" in /* | [A-Za-z]:*) ;; *) main_common="$parent/main/$main_common" ;; esac
+  [ "$common" -ef "$main_common" ] || return 1
+  printf '%s\n' "$parent"
 }
 
 # --- sourced: define the interactive `wt` function, then stop ---
@@ -61,7 +70,7 @@ if [ "$_wt_sourced" = "1" ]; then
     case "$sub" in
       main)
         local location
-        location="$(_wt_main_location)" || location="${WT_WORKTREE_REPO_LOCATION:-}"
+        location="$(_wt_layout_location)" || location="${WT_WORKTREE_REPO_LOCATION:-}"
         if [ -z "$location" ]; then
           echo "error: WT_WORKTREE_REPO_LOCATION is not set (see wt help)." >&2
           return 2
@@ -111,7 +120,7 @@ if [ "$_wt_sourced" = "1" ]; then
         # else the branch's, beside main when run there (as the dispatch below decides too), else
         # in WT_WORKTREE_REPO_LOCATION
         local location cd_file folder="" code=0
-        location="$(_wt_main_location)" || location="${WT_WORKTREE_REPO_LOCATION:-}"
+        location="$(_wt_layout_location)" || location="${WT_WORKTREE_REPO_LOCATION:-}"
         cd_file="$(mktemp "${TMPDIR:-/tmp}/wt-cd.XXXXXX" 2>/dev/null)" || cd_file=""
         WT_CD_FILE="$cd_file" bash "$WT_DIR/wt.sh" "$sub" "$@" || code=$?
         if [ -n "$cd_file" ]; then
@@ -186,12 +195,19 @@ sub="${1:-help}"
 
 run() { exec bash "$WT_DIR/$1" "${@:2}"; }
 
-# Run in a main folder: that layout, whatever the settings say. When they're another repo's (or
-# not set), gh finds the repo from main's clone rather than from WT_REPO_SLUG; when they're this
-# one's, the slug is kept, as gh can't tell which repo a clone with several remotes is.
+# Run in a folder of a layout (or, for wt link, given one): that layout, whatever the settings
+# say. When they're another repo's (or not set), gh finds the repo from main's clone rather than
+# from WT_REPO_SLUG; when they're this one's, the slug is kept, as gh can't tell which repo a clone
+# with several remotes is.
+layout_folder=""
+if [ "$sub" = link ]; then
+  for arg in "${@:2}"; do
+    case "$arg" in -*) ;; *) [ -d "$arg" ] && layout_folder="$arg" ;; esac
+  done
+fi
 case "$sub" in
   add | cd | rm | ls | link | clean)
-    if location="$(_wt_main_location)"; then
+    if location="$(_wt_layout_location "$layout_folder")"; then
       [ "${WT_WORKTREE_REPO_LOCATION:-}" -ef "$location" ] || unset WT_REPO_SLUG
       export WT_WORKTREE_REPO_LOCATION="$location"
     fi
@@ -254,6 +270,8 @@ Commands:
                           project-specific WT_SYMLINK_PAIRS, e.g. .cache/.env)
                           and its @scope/* workspace overrides.
                             <branch>          one worktree
+                            <folder>          the worktree in that folder (.)
+                            (neither)         the worktree it's run in
                             --all             every worktree (except main)
                             --check           report only, make no changes
                             --no-workspaces   skip the (slower) workspace step
@@ -280,9 +298,9 @@ Examples:
 
 Configuration (nothing is hardcoded here; each repo is configured by a
 per-repo alias that passes these WT_* values to `wt`, e.g. `my-repo-wt`).
-Run in a repo's main folder, wt works there without them, whatever
-WT_WORKTREE_REPO_LOCATION says (and WT_REPO_SLUG, when the location is
-another repo's):
+Run in a repo's main folder or a branch's folder beside it, wt works there
+without them, whatever WT_WORKTREE_REPO_LOCATION says (and WT_REPO_SLUG,
+when the location is another repo's):
   WT_WORKTREE_REPO_LOCATION   worktree collection folder (e.g. $HOME/Sites/fe)
   WT_REPO_SLUG                GitHub repo slug (owner/repo) used by `gh`
   WT_PROTECTED_BRANCHES       branches never removed (default: main)

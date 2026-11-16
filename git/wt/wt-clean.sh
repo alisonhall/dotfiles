@@ -59,7 +59,7 @@ export PAGER=cat
 if [[ -z "${WT_WORKTREE_REPO_LOCATION:-}" ]]; then
   echo "error: WT_WORKTREE_REPO_LOCATION is not set." >&2
   echo "       Export it in local/shell_local.sh (the worktree collection folder, e.g. \$HOME/Sites/fe)," >&2
-  echo "       or run wt in the repo's main folder." >&2
+  echo "       or run wt in the repo's main folder, or a branch's folder beside it." >&2
   exit 2
 fi
 # Without WT_REPO_SLUG (as when run in a main folder with no settings, or another repo's), the
