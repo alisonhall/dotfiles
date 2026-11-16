@@ -61,10 +61,13 @@ while [ $# -gt 0 ]; do
 	shift
 done
 
+# Shared helpers (worktree_symlink_pairs, is_folder_arg)
+source "$(cd "$(dirname "$0")" && pwd)/wt-common.sh"
+
 # (After the options, so -h works anywhere.) Given a folder, wt finds the layout from it - so
 # without a location here, the folder isn't in one.
 if [ -z "${WT_WORKTREE_REPO_LOCATION:-}" ]; then
-	if [ -n "$BRANCH" ] && [ -d "$BRANCH" ]; then
+	if [ -n "$BRANCH" ] && is_folder_arg "$BRANCH" && [ -d "$BRANCH" ]; then
 		echo "wt-link: $BRANCH isn't a branch's folder beside a main folder of the same repo." >&2
 		exit 1
 	fi
@@ -74,9 +77,6 @@ if [ -z "${WT_WORKTREE_REPO_LOCATION:-}" ]; then
 	exit 2
 fi
 REPO_ROOT="$WT_WORKTREE_REPO_LOCATION"
-
-# Shared symlink target list (worktree_symlink_pairs).
-source "$(cd "$(dirname "$0")" && pwd)/wt-common.sh"
 
 # The main worktree must be a valid git worktree. This works in BOTH layouts:
 # the bare-repo layout (fe/.bare + fe/main worktree) and the normal-repo-at-main
@@ -100,8 +100,8 @@ in_layout() {
 	printf "%s" "$REPO_ROOT/$(basename "$top")"
 }
 
-# Without a branch, the worktree it's run in. Given a folder rather than a branch (a branch's folder
-# name is never a branch name with a / in it, and . or a path is never a branch), that worktree.
+# Without a branch, the worktree it's run in. Given a folder - written as a path (is_folder_arg),
+# which is never a branch name - that worktree.
 FOLDER=""
 if [ "$ALL" -eq 0 ] && [ -z "$BRANCH" ]; then
 	if ! FOLDER="$(in_layout "$PWD")"; then
@@ -113,7 +113,7 @@ if [ "$ALL" -eq 0 ] && [ -z "$BRANCH" ]; then
 		fi
 		exit 1
 	fi
-elif [ -n "$BRANCH" ] && [ -d "$BRANCH" ]; then
+elif [ -n "$BRANCH" ] && is_folder_arg "$BRANCH"; then
 	if ! FOLDER="$(in_layout "$BRANCH")"; then
 		if [ "$(git -C "$BRANCH" rev-parse --show-toplevel 2>/dev/null)" -ef "$MAIN_WT" ]; then
 			echo "wt-link: $BRANCH is the main folder, which the links point at." >&2

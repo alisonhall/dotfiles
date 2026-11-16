@@ -195,14 +195,15 @@ sub="${1:-help}"
 
 run() { exec bash "$WT_DIR/$1" "${@:2}"; }
 
-# Run in a folder of a layout (or, for wt link, given one): that layout, whatever the settings
+# Run in a folder of a layout (or, for wt link and rm, given one): that layout, whatever the settings
 # say. When they're another repo's (or not set), gh finds the repo from main's clone rather than
 # from WT_REPO_SLUG; when they're this one's, the slug is kept, as gh can't tell which repo a clone
 # with several remotes is.
 layout_folder=""
-if [ "$sub" = link ]; then
+if [ "$sub" = link ] || [ "$sub" = rm ]; then
   for arg in "${@:2}"; do
-    case "$arg" in -*) ;; *) [ -d "$arg" ] && layout_folder="$arg" ;; esac
+    # (Written as a path, as is_folder_arg in wt-common.sh says: a plain name is a branch)
+    case "$arg" in . | .. | /* | ./* | ../* | [A-Za-z]:*) [ -d "$arg" ] && layout_folder="$arg" ;; esac
   done
 fi
 case "$sub" in
@@ -259,8 +260,14 @@ Commands:
                           (In zsh, wt adds the quotes itself. In bash, a name
                           split at an & runs wt in the background, and wt
                           stops and says so, rather than using half a name.)
-  rm <branch>            Remove a worktree folder and prune stale worktree
-                          registrations.
+  rm <branch>|<folder>    Remove a worktree folder (a branch's, or one named
+                          like .) and prune stale worktree registrations.
+                          Asks first if it has work that would be lost
+                          (uncommitted changes, new files, commits not on
+                          the remote); without a terminal, stops instead.
+                            --yes      delete it anyway, without asking
+                            --branch   delete the branch too (not a
+                                       protected one)
   ls [options]            List every worktree: branch, remote branch (and
                           whether it still exists), separate-folder marker,
                           dirty state, untracked count, ahead/behind.

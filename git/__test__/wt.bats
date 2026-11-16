@@ -335,6 +335,181 @@ merged_branch() {
 	[[ "$(git -C "$MAIN" worktree list)" != *feature_gone* ]] || false
 }
 
+@test "wt rm without a terminal stops for uncommitted changes, new files and commits not on GitHub, unless --yes" {
+	merged_branch feature/a
+	merged_branch feature/b
+	merged_branch feature/c
+	# A gh that knows no pull requests, so feature_c's new commit is in none
+	printf '#!/usr/bin/env bash\nexit 0\n' > "$BATS_TEST_TMPDIR/bin/gh"
+	echo change >> "$WT_WORKTREE_REPO_LOCATION/feature_a/.gitignore"
+	echo new > "$WT_WORKTREE_REPO_LOCATION/feature_b/new-file.txt"
+	git -C "$WT_WORKTREE_REPO_LOCATION/feature_c" commit -q --allow-empty -m "not pushed yet"
+	for b in a b c; do
+		run bash "$WT/wt.sh" rm "feature/$b" </dev/null
+		[ "$status" -eq 1 ]
+		[[ "$output" == *"feature_$b has work that deleting it would lose"* ]] || false
+		[[ "$output" == *"Not run from a terminal, so nothing was deleted. Add --yes"* ]] || false
+		[ -d "$WT_WORKTREE_REPO_LOCATION/feature_$b" ]
+	done
+	run bash "$WT/wt.sh" rm feature/a </dev/null
+	[[ "$output" == *".gitignore"* ]] || false
+	run bash "$WT/wt.sh" rm feature/b </dev/null
+	[[ "$output" == *"new-file.txt"* ]] || false
+	run bash "$WT/wt.sh" rm feature/c </dev/null
+	[[ "$output" == *"1 commit(s) not on origin"*"not pushed yet"* ]] || false
+	run bash "$WT/wt.sh" rm --yes feature/c </dev/null
+	[ "$status" -eq 0 ]
+	[ ! -e "$WT_WORKTREE_REPO_LOCATION/feature_c" ]
+	# Nothing to lose (its shared node_modules link is no work): no question
+	git -C "$MAIN" push -q origin main:refs/heads/feature/d 2>/dev/null
+	bash "$WT/wt.sh" add feature/d >/dev/null 2>&1
+	run bash "$WT/wt.sh" rm feature/d </dev/null
+	[ "$status" -eq 0 ]
+	[ ! -e "$WT_WORKTREE_REPO_LOCATION/feature_d" ]
+}
+
+@test "wt rm in a terminal asks before losing work, and deletes it only on yes" {
+	command -v script >/dev/null 2>&1 || skip "script isn't installed, to give it a terminal"
+	is_windows && skip "Git Bash's script can't give it a terminal"
+	merged_branch feature/a
+	echo new > "$WT_WORKTREE_REPO_LOCATION/feature_a/new-file.txt"
+	# script gives it a terminal (macOS and Linux spell it differently)
+	in_terminal() {
+		if script -q /dev/null true 2>/dev/null; then script -q /dev/null "$@"; else script -qec "$(printf '%q ' "$@")" /dev/null; fi
+	}
+	export -f in_terminal
+	run bash -c 'echo n | in_terminal bash "$1/wt.sh" rm feature/a' _ "$WT"
+	[[ "$output" == *"Delete feature_a anyway? [y/N]"* ]] || false
+	[[ "$output" == *"Nothing was deleted."* ]] || false
+	[ -d "$WT_WORKTREE_REPO_LOCATION/feature_a" ]
+	run bash -c 'echo y | in_terminal bash "$1/wt.sh" rm feature/a' _ "$WT"
+	[[ "$output" == *"Worktree folder feature_a removed."* ]] || false
+	[ ! -e "$WT_WORKTREE_REPO_LOCATION/feature_a" ]
+}
+
+@test "wt rm doesn't count a pr-<number> branch's pull request commits as not on GitHub" {
+	fork_pr 13 >/dev/null
+	export FAKE_PRS="13:true:main:feature/a"
+	bash "$WT/wt.sh" add --pr 13 >/dev/null 2>&1
+	run bash "$WT/wt.sh" rm pr-13 </dev/null
+	[ "$status" -eq 0 ]
+	[ ! -e "$WT_WORKTREE_REPO_LOCATION/pr-13" ]
+}
+
+@test "wt rm and wt link take a name as a branch, even when there's a folder of that name where they're run" {
+	merged_branch docs
+	merged_branch feature/x
+	mkdir -p "$WT_WORKTREE_REPO_LOCATION/feature_x/docs"
+	echo keep > "$WT_WORKTREE_REPO_LOCATION/feature_x/docs/notes.md"
+	git -C "$WT_WORKTREE_REPO_LOCATION/feature_x" add docs
+	git -C "$WT_WORKTREE_REPO_LOCATION/feature_x" commit -q -m docs
+	git -C "$WT_WORKTREE_REPO_LOCATION/feature_x" push -q 2>/dev/null
+	cd "$WT_WORKTREE_REPO_LOCATION/feature_x"
+	run bash "$WT/wt.sh" link --check --no-workspaces docs
+	[[ "$output" == *"Worktree: docs"* ]] || false
+	run bash "$WT/wt.sh" rm docs </dev/null
+	[ "$status" -eq 0 ]
+	[ ! -e "$WT_WORKTREE_REPO_LOCATION/docs" ]
+	[ -f "$WT_WORKTREE_REPO_LOCATION/feature_x/docs/notes.md" ]
+	# Written as a path, it's that folder - and one inside a branch folder isn't a branch folder
+	run bash "$WT/wt.sh" rm ./docs </dev/null
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"./docs is inside feature_x, not a branch's folder itself"* ]] || false
+	[ -f "$WT_WORKTREE_REPO_LOCATION/feature_x/docs/notes.md" ]
+}
+
+@test "wt rm doesn't count shared links as work, even ones git doesn't ignore" {
+	mkdir -p "$MAIN/.cache"
+	echo data > "$MAIN/.cache/build.json"
+	export WT_SYMLINK_PAIRS=.cache
+	git -C "$MAIN" push -q origin main:refs/heads/feature/a 2>/dev/null
+	bash "$WT/wt.sh" add feature/a >/dev/null 2>&1
+	[ "$WT_WORKTREE_REPO_LOCATION/feature_a/.cache" -ef "$MAIN/.cache" ]
+	run bash "$WT/wt.sh" rm feature/a </dev/null
+	[ "$status" -eq 0 ]
+	[ ! -e "$WT_WORKTREE_REPO_LOCATION/feature_a" ]
+	[ -f "$MAIN/.cache/build.json" ]
+}
+
+@test "wt rm doesn't count a merged pull request's commits as not on GitHub once its branch is deleted" {
+	merged_branch feature/done
+	# GitHub deletes the branch after the merge, and a fetch drops git's copy of it
+	git -C "$MAIN" push -q origin --delete feature/done 2>/dev/null
+	git -C "$MAIN" fetch -q --prune
+	run bash "$WT/wt.sh" rm feature/done </dev/null
+	[ "$status" -eq 0 ]
+	[ ! -e "$WT_WORKTREE_REPO_LOCATION/feature_done" ]
+	# A commit made after it, though, is
+	merged_branch feature/more
+	git -C "$MAIN" push -q origin --delete feature/more 2>/dev/null
+	git -C "$MAIN" fetch -q --prune
+	# (the fake gh says it merged at its commit now, so make one after asking: move the branch on)
+	sha="$(git -C "$WT_WORKTREE_REPO_LOCATION/feature_more" rev-parse HEAD)"
+	git -C "$WT_WORKTREE_REPO_LOCATION/feature_more" commit -q --allow-empty -m "after the merge"
+	cat > "$BATS_TEST_TMPDIR/bin/gh" <<-EOF
+		#!/usr/bin/env bash
+		[ "\$1 \$2" = "pr list" ] && printf '1\tMERGED\t%s\n' "$sha"
+		exit 0
+	EOF
+	run bash "$WT/wt.sh" rm feature/more </dev/null
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"1 commit(s) not on origin"*"after the merge"* ]] || false
+}
+
+@test "wt rm --branch deletes the branch too, but never a protected one" {
+	merged_branch feature/a
+	run bash "$WT/wt.sh" rm --branch feature/a </dev/null
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"Branch feature/a deleted."* ]] || false
+	run git -C "$MAIN" show-ref --verify --quiet refs/heads/feature/a
+	[ "$status" -ne 0 ]
+	[ -z "$(git -C "$MAIN" config --get branch.feature/a.remote)" ]
+	# Without --branch it stays
+	merged_branch feature/b
+	bash "$WT/wt.sh" rm feature/b </dev/null >/dev/null 2>&1
+	git -C "$MAIN" show-ref --verify --quiet refs/heads/feature/b
+	# A protected one, in a folder of its own
+	git -C "$MAIN" branch -q release main
+	git -C "$MAIN" worktree add -q "$WT_WORKTREE_REPO_LOCATION/release" release
+	git -C "$WT_WORKTREE_REPO_LOCATION/release" push -q -u origin release 2>/dev/null
+	export WT_PROTECTED_BRANCHES="main release"
+	run bash "$WT/wt.sh" rm --branch release </dev/null
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"Kept branch release, as it's protected."* ]] || false
+	git -C "$MAIN" show-ref --verify --quiet refs/heads/release
+}
+
+@test "wt rm given a branch's folder removes it, from anywhere and with nothing set" {
+	merged_branch feature/a
+	merged_branch feature/b
+	export WT_WORKTREE_REPO_LOCATION="$BATS_TEST_TMPDIR/other"
+	unset WT_REPO_SLUG
+	cd "$BATS_TEST_TMPDIR"
+	run bash "$WT/wt.sh" rm --branch "$BATS_TEST_TMPDIR/repo/feature_a" </dev/null
+	[ "$status" -eq 0 ]
+	[ ! -e "$BATS_TEST_TMPDIR/repo/feature_a" ]
+	[[ "$output" == *"Branch feature/a deleted."* ]] || false
+	# As ., from inside a subfolder's parent
+	cd "$BATS_TEST_TMPDIR/repo/feature_b"
+	run bash "$WT/wt.sh" rm . </dev/null
+	[ "$status" -eq 0 ]
+	[ ! -e "$BATS_TEST_TMPDIR/repo/feature_b" ]
+	cd "$BATS_TEST_TMPDIR"
+	# The main folder, or a folder that isn't a branch's
+	run bash "$WT/wt.sh" rm "$MAIN"
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"won't delete the main folder"* ]] || false
+	mkdir "$BATS_TEST_TMPDIR/elsewhere"
+	unset WT_WORKTREE_REPO_LOCATION
+	run bash "$WT/wt.sh" rm "$BATS_TEST_TMPDIR/elsewhere"
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"isn't a branch's folder beside a main folder of the same repo"* ]] || false
+	[ -d "$BATS_TEST_TMPDIR/elsewhere" ]
+	run bash "$WT/wt.sh" rm -h
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"--branch"* ]] || false
+}
+
 @test "wt rm won't delete the main folder" {
 	run bash "$WT/wt.sh" rm main
 	[ "$status" -ne 0 ]
@@ -343,6 +518,8 @@ merged_branch() {
 }
 
 @test "wt rm won't take anything git wouldn't accept as a branch name, like . or .." {
+	# In the folder that holds main, where . is that folder and .. the one holding it
+	cd "$WT_WORKTREE_REPO_LOCATION"
 	for name in . .. .git feature/.hidden; do
 		run bash "$WT/wt.sh" rm "$name"
 		[ "$status" -ne 0 ]
@@ -486,7 +663,8 @@ fail_rename_back() {
 	folder="$WT_WORKTREE_REPO_LOCATION/feature_busy"
 	echo notes > "$folder/notes.txt"
 	hold_folder "$folder"
-	run bash "$WT/wt.sh" rm feature/busy
+	# (--yes: notes.txt is work it would otherwise stop for, before looking)
+	run bash "$WT/wt.sh" rm --yes feature/busy
 	release_folder
 	[ "$status" -ne 0 ]
 	[[ "$output" == *"in use by another program"* ]] || false

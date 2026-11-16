@@ -1,40 +1,103 @@
 #!/usr/bin/env bash
 # wt-rm.sh — remove a worktree folder and prune stale worktree registrations.
 # Invoked by the wt function (git/wt/wt.sh), sourced from shell/common/git.sh.
+#
+# Usage:
+#   wt-rm <branch>            remove the branch's folder
+#   wt-rm <folder>            remove that branch folder, written as a path (.,
+#                             ./x, ../x or a full path; a plain name is a branch)
+#   wt-rm --branch <...>      also delete the branch it holds (not a protected
+#                             one: CURRENT_DEV_BRANCH, WT_PROTECTED_BRANCHES)
+#   wt-rm --yes <...>         don't ask when the folder holds work that would be
+#                             lost (uncommitted changes, new files, commits
+#                             not on the remote)
+#   wt-rm -h                  help
+#
+# With such work, it lists it and asks first - or, not run from a terminal
+# (where nobody could answer), stops without deleting anything, unless --yes.
 
+YES=0
+DELETE_BRANCH=0
+REMOTE_BRANCH_NAME=""
+usage() {
+	echo "Usage: wt-rm [--yes] [--branch] <branch-name | folder>" >&2
+	exit 1
+}
+while [ $# -gt 0 ]; do
+	case "$1" in
+		--yes) YES=1 ;;
+		--branch) DELETE_BRANCH=1 ;;
+		-h | --help)
+			sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
+			exit 0
+			;;
+		-*)
+			echo "wt-rm: unknown option $1" >&2
+			exit 1
+			;;
+		*)
+			[ -z "$REMOTE_BRANCH_NAME" ] || usage
+			REMOTE_BRANCH_NAME="$1"
+			;;
+	esac
+	shift
+done
+[ -n "$REMOTE_BRANCH_NAME" ] || usage
+
+# folder_in_use, remove_links, pull_ref_number, is_folder_arg
+source "$(cd "$(dirname "$0")" && pwd)/wt-common.sh"
+
+# (After the options, so -h works anywhere.) Given a folder, wt finds the layout from it - so
+# without a location here, the folder isn't in one.
 if [ -z "${WT_WORKTREE_REPO_LOCATION:-}" ]; then
+	if is_folder_arg "$REMOTE_BRANCH_NAME" && [ -d "$REMOTE_BRANCH_NAME" ]; then
+		echo "wt-rm: $REMOTE_BRANCH_NAME isn't a branch's folder beside a main folder of the same repo." >&2
+		exit 1
+	fi
 	echo "error: WT_WORKTREE_REPO_LOCATION is not set." >&2
 	echo "       Export it in local/shell_local.sh (the worktree collection folder, e.g. \$HOME/Sites/fe)," >&2
 	echo "       or run wt in the repo's main folder, or a branch's folder beside it." >&2
 	exit 2
 fi
+CURRENT_DEV_BRANCH="${CURRENT_DEV_BRANCH:-main}"
+CURRENT_REMOTE_NAME="${CURRENT_REMOTE_NAME:-origin}"
 
-REMOTE_BRANCH_NAME="$1"
-LOCAL_BRANCH_NAME="${REMOTE_BRANCH_NAME//\//_}"
-
-if [ -z "$REMOTE_BRANCH_NAME" ]; then
-	echo "Usage: wt-rm <branch-name>"
-	exit 1
-fi
-
-# folder_in_use, remove_links
-source "$(cd "$(dirname "$0")" && pwd)/wt-common.sh"
-
-folder="$WT_WORKTREE_REPO_LOCATION/$LOCAL_BRANCH_NAME"
 MAIN_WT="$WT_WORKTREE_REPO_LOCATION/main"
 
-# Only ever a branch's folder. Something git wouldn't accept as a branch name could be another
-# folder entirely: .bare (the repo itself, in the bare-repo layout), . or .. (the collection
-# folder, or the one it's in).
-if ! git check-ref-format --branch "$REMOTE_BRANCH_NAME" >/dev/null 2>&1; then
-	echo "wt-rm: '$REMOTE_BRANCH_NAME' isn't a branch name."
-	exit 1
-fi
-# Never the main folder: it holds the repo's git data, so deleting it would lose every unpushed
-# branch and stash, and break every other branch folder
-if [ "$LOCAL_BRANCH_NAME" = main ] || { [ -d "$folder" ] && [ "$folder" -ef "$MAIN_WT" ]; }; then
-	echo "wt-rm: won't delete the main folder, which holds the repo itself."
-	exit 1
+# Given a folder - written as a path (is_folder_arg), which is never a branch name - that branch
+# folder: the folder itself, not one inside it, as deleting goes further than what was named.
+if is_folder_arg "$REMOTE_BRANCH_NAME" && [ -d "$REMOTE_BRANCH_NAME" ] && top="$(git -C "$REMOTE_BRANCH_NAME" rev-parse --show-toplevel 2>/dev/null)" && [ -n "$top" ]; then
+	if ! [ "$top" -ef "$REMOTE_BRANCH_NAME" ]; then
+		echo "wt-rm: $REMOTE_BRANCH_NAME is inside $(basename "$top"), not a branch's folder itself. Name the folder itself to remove it." >&2
+		exit 1
+	fi
+	if [ "$top" -ef "$MAIN_WT" ]; then
+		echo "wt-rm: won't delete the main folder, which holds the repo itself."
+		exit 1
+	fi
+	if ! [ "$(dirname "$top")" -ef "$WT_WORKTREE_REPO_LOCATION" ]; then
+		echo "wt-rm: $REMOTE_BRANCH_NAME isn't a branch's folder beside $MAIN_WT." >&2
+		exit 1
+	fi
+	LOCAL_BRANCH_NAME="$(basename "$top")"
+	REMOTE_BRANCH_NAME="$LOCAL_BRANCH_NAME"
+	folder="$WT_WORKTREE_REPO_LOCATION/$LOCAL_BRANCH_NAME"
+else
+	LOCAL_BRANCH_NAME="${REMOTE_BRANCH_NAME//\//_}"
+	folder="$WT_WORKTREE_REPO_LOCATION/$LOCAL_BRANCH_NAME"
+	# Only ever a branch's folder. Something git wouldn't accept as a branch name could be another
+	# folder entirely: .bare (the repo itself, in the bare-repo layout), . or .. (the collection
+	# folder, or the one it's in).
+	if ! git check-ref-format --branch "$REMOTE_BRANCH_NAME" >/dev/null 2>&1; then
+		echo "wt-rm: '$REMOTE_BRANCH_NAME' isn't a branch name."
+		exit 1
+	fi
+	# Never the main folder: it holds the repo's git data, so deleting it would lose every unpushed
+	# branch and stash, and break every other branch folder
+	if [ "$LOCAL_BRANCH_NAME" = main ] || { [ -d "$folder" ] && [ "$folder" -ef "$MAIN_WT" ]; }; then
+		echo "wt-rm: won't delete the main folder, which holds the repo itself."
+		exit 1
+	fi
 fi
 
 if [ ! -d "$folder" ]; then
@@ -61,6 +124,73 @@ if [ ! -d "$folder" ]; then
 	exit 0
 fi
 
+# The branch the folder holds (none when detached), for --branch
+held_branch="$(git -C "$folder" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+
+# --- work that deleting the folder would lose --------------------------------
+# Uncommitted changes, new files - not ignored ones, nor links (the shared ones, like .cache, may
+# not be ignored), as wt clean counts them - and commits on none of the remote's branches, nor in
+# its pull requests' latest versions: a merged PR's branch is usually deleted, and a fetch then
+# drops git's copy of it.
+work=""
+changes="$(git -C "$folder" status --porcelain --untracked-files=no 2>/dev/null)"
+nl=$'\n'
+while IFS= read -r -d '' new_file; do
+	[ -L "$folder/$new_file" ] && continue
+	changes="${changes:+$changes$nl}?? $new_file"
+done < <(git -C "$folder" ls-files -z --others --exclude-standard 2>/dev/null)
+if [ -n "$changes" ]; then
+	work="  uncommitted changes and new files:"$'\n'"$(printf '%s\n' "$changes" | head -n 10 | sed 's/^/    /')"
+	[ "$(printf '%s\n' "$changes" | wc -l)" -gt 10 ] && work="$work"$'\n'"    ..."
+fi
+exclude=()
+unpushed="$(git -C "$folder" log --oneline HEAD --not --remotes 2>/dev/null || true)"
+if [ -n "$unpushed" ] && [ -n "$held_branch" ]; then
+	# Its pull requests' latest commits: a pr-<number> branch's from its pull ref, else gh's by branch
+	if number="$(pull_ref_number "$held_branch")"; then
+		pr_heads="$(git -C "$MAIN_WT" ls-remote "$CURRENT_REMOTE_NAME" "refs/pull/$number/head" 2>/dev/null | cut -f1)"
+	elif command -v gh >/dev/null 2>&1; then
+		pr_heads="$(cd "$MAIN_WT" && {
+			if [ -n "${WT_REPO_SLUG:-}" ]; then set -- --repo "$WT_REPO_SLUG"; else set --; fi
+			gh pr list "$@" --head "$held_branch" --state all --json number,state,headRefOid \
+				--jq '.[] | "\(.number)\t\(.state)\t\(.headRefOid)"' 2>/dev/null
+		} | cut -f3)"
+	else
+		pr_heads=""
+	fi
+	for pr_head in $pr_heads; do
+		git -C "$MAIN_WT" cat-file -e "$pr_head^{commit}" 2>/dev/null && exclude+=("$pr_head")
+	done
+	if [ "${#exclude[@]}" -gt 0 ]; then
+		unpushed="$(git -C "$folder" log --oneline HEAD --not --remotes "${exclude[@]}" 2>/dev/null || true)"
+	fi
+fi
+if [ -n "$unpushed" ]; then
+	count="$(printf '%s\n' "$unpushed" | wc -l | tr -d ' ')"
+	[ -n "$work" ] && work="$work"$'\n'
+	work="$work  $count commit(s) not on $CURRENT_REMOTE_NAME:"$'\n'"$(printf '%s\n' "$unpushed" | head -n 5 | sed 's/^/    /')"
+	[ "$count" -gt 5 ] && work="$work"$'\n'"    ..."
+fi
+
+if [ -n "$work" ] && [ "$YES" != 1 ]; then
+	echo "wt-rm: $LOCAL_BRANCH_NAME has work that deleting it would lose:"
+	printf '%s\n' "$work"
+	if [ -t 0 ]; then
+		printf 'Delete %s anyway? [y/N] ' "$LOCAL_BRANCH_NAME"
+		read -r answer || answer=""
+		case "$answer" in
+			y | Y | yes | Yes) ;;
+			*)
+				echo "Nothing was deleted."
+				exit 1
+				;;
+		esac
+	else
+		echo "Not run from a terminal, so nothing was deleted. Add --yes to delete it anyway." >&2
+		exit 1
+	fi
+fi
+
 in_use=0
 folder_in_use "$folder" || in_use=$?
 case "$in_use" in
@@ -72,12 +202,33 @@ case "$in_use" in
 	2) exit 1 ;; # Renamed and stuck; folder_in_use said where it is
 esac
 
-# Links first, so nothing they point at (like main/node_modules) can be deleted with the folder
+# Links first, so nothing they point at (like main/node_modules) can be deleted with the folder.
+# (-f: whether to delete was settled above, so rm doesn't ask about read-only files too.)
 remove_links "$folder"
-rm -rd "$folder"
+rm -rf "$folder"
 echo "Worktree folder $LOCAL_BRANCH_NAME removed."
 # Anchor the prune on the main worktree: the collection folder is not a git
 # repo in the normal-repo-at-main layout, and the user's CWD may not be a git
 # repo at all. main is a valid worktree in both layouts.
 git -C "$MAIN_WT" worktree prune
 echo "Pruned stale worktrees."
+
+# --branch: the branch it held, with its settings - never a protected one
+if [ "$DELETE_BRANCH" = 1 ]; then
+	if [ -z "$held_branch" ]; then
+		echo "No branch to delete: the folder had none checked out."
+	else
+		for protected in $CURRENT_DEV_BRANCH ${WT_PROTECTED_BRANCHES:-main}; do
+			if [ "$held_branch" = "$protected" ]; then
+				echo "Kept branch $held_branch, as it's protected."
+				exit 0
+			fi
+		done
+		if git -C "$MAIN_WT" branch -D "$held_branch" >/dev/null; then
+			echo "Branch $held_branch deleted."
+		else
+			echo "wt-rm: couldn't delete branch $held_branch (above)." >&2
+			exit 1
+		fi
+	fi
+fi

@@ -19,6 +19,15 @@ pull_ref_number() {
 	printf '%s' "$number"
 }
 
+# is_folder_arg <arg>: Whether a command's argument is a folder rather than a branch: written as a
+# path - ., .., ./x, ../x, a full path, or one with a drive letter - none of which can be a branch
+# name. A plain name is always a branch, even with a folder of that name where it's run (wt rm docs
+# in a branch folder with a docs folder means the docs branch, not that folder).
+is_folder_arg() {
+	case "$1" in . | .. | /* | ./* | ../* | [A-Za-z]:*) return 0 ;; esac
+	return 1
+}
+
 # tell_folder <folder>: For the wt function, which moves your terminal into the folder once the
 # script finishes, and can't always work it out itself (with --pr, only the script knows the
 # branch). Only when it asks, with WT_CD_FILE.
