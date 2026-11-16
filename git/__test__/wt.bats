@@ -629,6 +629,55 @@ deleted_after_merge() {
 #   THE MAIN FOLDER'S BRANCH
 #   -------------------------------
 
+@test "wt ls --porcelain prints one tab-separated line per worktree, and nothing else" {
+	git -C "$MAIN" push -q origin main:refs/heads/feature/x 2>/dev/null
+	bash "$WT/wt.sh" add feature/x >/dev/null 2>&1
+	fork_pr 13 >/dev/null
+	export FAKE_PRS="13:true:main:feature/a"
+	bash "$WT/wt.sh" add --pr 13 >/dev/null 2>&1
+	echo work > "$WT_WORKTREE_REPO_LOCATION/feature_x/new-file.txt"
+	pr_commit 13 >/dev/null
+	out="$(bash "$WT/wt.sh" ls --porcelain 2>/dev/null)"
+	[ "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" = 3 ]
+	# 14 fields on every line
+	[ -z "$(printf '%s\n' "$out" | awk -F'\t' 'NF != 14')" ]
+	field() { printf '%s\n' "$out" | awk -F'\t' -v b="$1" -v f="$2" '$2 == b { print $f }'; }
+	# The main folder
+	[ "$(field main 1)" -ef "$MAIN" ]
+	[ "$(field main 3)" = "$(git -C "$MAIN" rev-parse HEAD)" ]
+	[ "$(field main 5)" = refs/heads/main ]
+	[ "$(field main 12)" = 1 ]
+	# A branch folder, with a new file in it
+	[ "$(field feature/x 1)" -ef "$WT_WORKTREE_REPO_LOCATION/feature_x" ]
+	[ "$(field feature/x 4)" = origin ]
+	[ "$(field feature/x 5)" = refs/heads/feature/x ]
+	[ "$(field feature/x 6)" = exists ]
+	[ "$(field feature/x 7) $(field feature/x 8)" = "0 0" ]
+	[ "$(field feature/x 9) $(field feature/x 10)" = "no 1" ]
+	[ "$(field feature/x 11)" = sibling ]
+	[ "$(field feature/x 12) $(field feature/x 13) $(field feature/x 14)" = "0 0 0" ]
+	# A pull request's, one behind it
+	[ "$(field pr-13 5)" = refs/pull/13/head ]
+	[ "$(field pr-13 6)" = exists ]
+	[ "$(field pr-13 7) $(field pr-13 8)" = "0 1" ]
+}
+
+@test "wt ls --porcelain leaves a detached folder's remote empty, and -h works with nothing set" {
+	git -C "$MAIN" push -q origin main:refs/heads/feature/x 2>/dev/null
+	bash "$WT/wt.sh" add feature/x >/dev/null 2>&1
+	git -C "$MAIN" worktree add -q --detach "$WT_WORKTREE_REPO_LOCATION/zz-detached" main
+	out="$(bash "$WT/wt.sh" ls --porcelain --no-fetch 2>/dev/null)"
+	row="$(printf '%s\n' "$out" | awk -F'\t' '$1 ~ /zz-detached$/')"
+	[ -n "$row" ]
+	[ "$(printf '%s' "$row" | cut -f2,4,5,6 | tr '\t' ,)" = ",,,none" ]
+	unset WT_WORKTREE_REPO_LOCATION WT_REPO_SLUG
+	cd "$BATS_TEST_TMPDIR"
+	run bash "$WT/wt.sh" ls -h
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"--porcelain"* ]] || false
+	[[ "$output" == *"14 1 when git can prune it"* ]] || false
+}
+
 @test "wt ls doesn't warn about the main folder holding the start branch, even when that isn't main" {
 	git -C "$MAIN" switch -q -c develop
 	export CURRENT_DEV_BRANCH=develop

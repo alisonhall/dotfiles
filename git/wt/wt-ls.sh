@@ -33,6 +33,20 @@
 #   wt-ls.sh              # fetch, then list (default)
 #   wt-ls.sh --no-fetch   # skip the fetch; use last-fetched refs
 #   wt-ls.sh --fetch      # explicit fetch (same as default)
+#   wt-ls.sh --porcelain  # for a tool: one line per worktree, nothing else,
+#                         # its fields tab-separated (empty when there's none):
+#     1 folder (as git lists it)    2 branch (empty when detached)
+#     3 commit checked out          4 remote (like origin)
+#     5 the remote ref it follows (refs/heads/<branch>, or refs/pull/<n>/head)
+#     6 remote state: exists, deleted, unknown (not verified) or none
+#     7 ahead  8 behind (numbers, when they could be counted)
+#     9 tracked changes: yes, no or missing (the folder is gone)
+#     10 untracked files: a number, or missing
+#     11 where: sibling (beside main), nested or outside
+#     12 1 for the main folder, else 0
+#     13 1 when the branch isn't the folder's name, 2 when the main folder
+#        doesn't hold CURRENT_DEV_BRANCH, else 0
+#     14 1 when git can prune it (its folder is gone), else 0
 #   wt-ls.sh -h           # help
 #
 # Output is colour-coded when stdout is a TTY (and NO_COLOR is unset):
@@ -43,12 +57,6 @@
 
 set -uo pipefail
 
-if [ -z "${WT_WORKTREE_REPO_LOCATION:-}" ]; then
-	echo "error: WT_WORKTREE_REPO_LOCATION is not set." >&2
-	echo "       Export it in local/shell_local.sh (the worktree collection folder, e.g. \$HOME/Sites/fe)," >&2
-	echo "       or run wt in the repo's main folder, or a branch's folder beside it." >&2
-	exit 2
-fi
 CURRENT_REMOTE_NAME="${CURRENT_REMOTE_NAME:-origin}"
 # The branch the main folder holds (the main folder is always called main)
 DEV_BRANCH="${CURRENT_DEV_BRANCH:-main}"
@@ -56,12 +64,14 @@ DEV_BRANCH="${CURRENT_DEV_BRANCH:-main}"
 # Fetch remote-tracking refs before computing ahead/behind (default on). Pass
 # --no-fetch to skip it (faster / offline); --fetch is the explicit default.
 FETCH=1
+PORCELAIN=0
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--fetch) FETCH=1 ;;
 		--no-fetch) FETCH=0 ;;
+		--porcelain) PORCELAIN=1 ;;
 		-h|--help)
-			sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
+			sed -n '2,54p' "$0" | sed 's/^# \{0,1\}//'
 			exit 0
 			;;
 		*)
@@ -72,6 +82,13 @@ while [ $# -gt 0 ]; do
 	shift
 done
 
+# (After the options, so -h works anywhere)
+if [ -z "${WT_WORKTREE_REPO_LOCATION:-}" ]; then
+	echo "error: WT_WORKTREE_REPO_LOCATION is not set." >&2
+	echo "       Export it in local/shell_local.sh (the worktree collection folder, e.g. \$HOME/Sites/fe)," >&2
+	echo "       or run wt in the repo's main folder, or a branch's folder beside it." >&2
+	exit 2
+fi
 REPO_ROOT="$WT_WORKTREE_REPO_LOCATION"
 
 # The main worktree must be a valid git worktree. This works in BOTH layouts:
@@ -109,6 +126,7 @@ fi
 # which we skip). A record may also carry `prunable <reason>` when its folder
 # has been deleted but the registration remains.
 paths=()
+git_paths=()   # as git lists them (with a drive letter on Windows), for --porcelain
 heads=()
 branches=()    # branch name, or "" for detached/bare
 prunable=()    # "1" when the record is flagged prunable
@@ -121,6 +139,7 @@ while IFS= read -r line; do
 			# The same physical form as REPO_ROOT, so folder_location can compare them (on
 			# Windows, git writes C:/... and Git Bash /c/...). A missing folder is kept as is.
 			wt_path="${line#worktree }"
+			git_paths+=("$wt_path")
 			paths+=("$(cd "$wt_path" 2>/dev/null && pwd -P || printf '%s' "$wt_path")")
 			heads+=("")
 			branches+=("")
@@ -264,10 +283,12 @@ untracked_count() {
 # otherwise the caller supplies its own "n/a (...)" text.
 ahead_behind() {
 	local path="$1" ref="${2:-}" counts ahead behind
+	AB_AHEAD=""; AB_BEHIND=""
 	# Against <ref> when given (a pull request's latest commit), else the upstream
 	[ -n "$ref" ] || ref='@{u}'
 	if counts="$(git -C "$path" rev-list --left-right --count "HEAD...$ref" 2>/dev/null)"; then
 		read -r ahead behind <<< "$counts"
+		AB_AHEAD="${ahead:-0}"; AB_BEHIND="${behind:-0}"
 		if [ "${ahead:-0}" -eq 0 ] && [ "${behind:-0}" -eq 0 ]; then
 			AB_TEXT="up to date"
 			AB_STATE="up-to-date"
@@ -282,6 +303,7 @@ ahead_behind() {
 }
 
 # --- build display rows ------------------------------------------------------
+porcelain_rows=()
 disp_folder=()
 disp_branch=()
 disp_remote=()
@@ -308,6 +330,7 @@ for i in "${!paths[@]}"; do
 	loc="$(folder_location "$path")"
 
 	# Branch line: the branch name, or the detached HEAD short SHA.
+	remote_name=""
 	if [ -n "$branch" ]; then
 		bdisp="$branch"
 		remote_name="$(git -C "$MAIN_WT" config "branch.${branch}.remote" 2>/dev/null || true)"
@@ -358,6 +381,7 @@ for i in "${!paths[@]}"; do
 
 	# Ahead/behind vs the upstream remote branch. Only meaningful when the
 	# remote branch exists and the folder is present; otherwise "n/a (...)".
+	AB_AHEAD=""; AB_BEHIND=""
 	if [ ! -d "$path" ]; then
 		ab="n/a (missing folder)"; ab_state="n/a"
 	elif [ "$remote_state" = "exists" ]; then
@@ -402,8 +426,25 @@ for i in "${!paths[@]}"; do
 	disp_ab_state+=("$ab_state")
 	disp_mismatch+=("$mismatch")
 	disp_path+=("$path")
+	# For --porcelain
+	if [ -n "$branch" ]; then
+		row_ref="$(git -C "$MAIN_WT" config "branch.${branch}.merge" 2>/dev/null || true)"
+	else
+		row_ref=""
+	fi
+	if [ "$path" = "$MAIN_WT" ]; then row_main=1; else row_main=0; fi
+	porcelain_rows+=("$(printf '%s\t' "${git_paths[$i]}" "$branch" "$head" "${remote_name:-}" "$row_ref" \
+		"$remote_state" "$AB_AHEAD" "$AB_BEHIND" "$dirty" "$untracked" "$loc" "$row_main" "$mismatch")${prunable[$i]}")
 	count=$((count+1))
 done
+
+# --porcelain: just the rows (an empty list is no lines, not an error)
+if [ "$PORCELAIN" = 1 ]; then
+	for row in ${porcelain_rows[@]+"${porcelain_rows[@]}"}; do
+		printf '%s\n' "$row"
+	done
+	exit 0
+fi
 
 if [ "$count" -eq 0 ]; then
 	echo "wt-ls: no worktrees found at $REPO_ROOT."
