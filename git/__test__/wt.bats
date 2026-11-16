@@ -377,12 +377,26 @@ merged_branch() {
 	in_terminal() {
 		if script -q /dev/null true 2>/dev/null; then script -q /dev/null "$@"; else script -qec "$(printf '%q ' "$@")" /dev/null; fi
 	}
-	export -f in_terminal
-	run bash -c 'echo n | in_terminal bash "$1/wt.sh" rm feature/a' _ "$WT"
+	# answer_in_terminal <answer> <command...>: The command in a terminal, typing <answer>. The
+	# typing is kept open until the command ends: macOS's script ends the terminal, cutting the
+	# command off, as soon as what it's typing runs out.
+	answer_in_terminal() {
+		local fifo="$BATS_TEST_TMPDIR/terminal-input" pid code=0
+		rm -f "$fifo"
+		mkfifo "$fifo"
+		in_terminal "${@:2}" <"$fifo" &
+		pid=$!
+		exec 4>"$fifo"
+		printf '%s\n' "$1" >&4
+		wait "$pid" || code=$?
+		exec 4>&-
+		return "$code"
+	}
+	run answer_in_terminal n bash "$WT/wt.sh" rm feature/a
 	[[ "$output" == *"Delete feature_a anyway? [y/N]"* ]] || false
 	[[ "$output" == *"Nothing was deleted."* ]] || false
 	[ -d "$WT_WORKTREE_REPO_LOCATION/feature_a" ]
-	run bash -c 'echo y | in_terminal bash "$1/wt.sh" rm feature/a' _ "$WT"
+	run answer_in_terminal y bash "$WT/wt.sh" rm feature/a
 	[[ "$output" == *"Worktree folder feature_a removed."* ]] || false
 	[ ! -e "$WT_WORKTREE_REPO_LOCATION/feature_a" ]
 }
