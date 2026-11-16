@@ -207,9 +207,18 @@ worktree_block_reason() {
   local prs num state oid
   local open_pr="" merged_oid="" merged_pr="" closed_oid="" closed_pr=""
   # PR state is literally OPEN / MERGED / CLOSED (closed-without-merge).
-  prs=$(gh pr list --repo "$REPO_SLUG" --head "$branch" --state all \
-                --json number,state,headRefOid \
-                --jq '.[] | "\(.number)\t\(.state)\t\(.headRefOid)"' 2>/dev/null || true)
+  # A branch following a PR's head (wt add --pr's pr-<number>) is that PR's, whatever it's called:
+  # no PR has it as its head branch, so it's looked up by number.
+  local pull_number
+  if pull_number="$(pull_ref_number "$branch")"; then
+    prs=$(gh pr view "$pull_number" --repo "$REPO_SLUG" \
+                  --json number,state,headRefOid \
+                  --jq '"\(.number)\t\(.state)\t\(.headRefOid)"' 2>/dev/null || true)
+  else
+    prs=$(gh pr list --repo "$REPO_SLUG" --head "$branch" --state all \
+                  --json number,state,headRefOid \
+                  --jq '.[] | "\(.number)\t\(.state)\t\(.headRefOid)"' 2>/dev/null || true)
+  fi
   while IFS=$'\t' read -r num state oid; do
     [[ -z "$num" ]] && continue
     if [[ "$state" == "OPEN" ]]; then

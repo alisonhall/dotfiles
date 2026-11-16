@@ -5,7 +5,10 @@
 #   * the folder it lives in (basename) and its full path
 #   * the branch checked out (or the detached HEAD commit)
 #   * the associated remote branch, and whether it STILL EXISTS on the remote
-#     (verified with a single `git ls-remote`, not the stale local ref)
+#     (verified with a single `git ls-remote`, not the stale local ref) - or,
+#     for a branch following a pull request's head (refs/pull/<n>/head, as
+#     wt add --pr sets up a fork's PR), that PR, asked for in one more
+#     `git ls-remote` and compared with its latest commit
 #   * whether the worktree folder is a SEPARATE sibling folder under the repo
 #     root (the normal layout), nested inside another folder, or located
 #     outside the repo root entirely
@@ -88,6 +91,9 @@ REPO_ROOT="$(cd "$REPO_ROOT" && pwd -P)"
 # Anchor for all central git ops (see the check above).
 MAIN_WT="$REPO_ROOT/main"
 
+# Shared helpers (pull_ref_number)
+source "$(cd "$(dirname "$0")" && pwd)/wt-common.sh"
+
 # --- colour (only when stdout is a TTY and NO_COLOR is unset) ---------------
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
 	C_RESET=$'\033[0m'; C_BOLD=$'\033[1m'; C_DIM=$'\033[2m'
@@ -158,6 +164,25 @@ REMOTE_HEADS=""
 REMOTE_FETCH_OK=0
 if REMOTE_HEADS="$(git -C "$MAIN_WT" ls-remote --heads "$CURRENT_REMOTE_NAME" 2>/dev/null | awk '{print $2}')"; then
 	REMOTE_FETCH_OK=1
+fi
+
+# Branches following a pull request's head aren't among the remote's branches: their pull refs
+# are asked for in one more ls-remote, and fetched with the rest (which changes no refs, but brings
+# the commits, so ahead/behind can be counted against the PR's latest one).
+PULL_REFS=()
+# (Written so an empty list is fine under set -u in bash 3.2)
+for b in ${branches[@]+"${branches[@]}"}; do
+	[ -n "$b" ] && n="$(pull_ref_number "$b")" && PULL_REFS+=("refs/pull/$n/head")
+done
+PULL_HEADS=""
+PULL_FETCH_OK=0
+if [ "${#PULL_REFS[@]}" -gt 0 ]; then
+	if [ "$FETCH" = "1" ] && ! git -C "$MAIN_WT" fetch --quiet "$CURRENT_REMOTE_NAME" "${PULL_REFS[@]}" 2>/dev/null; then
+		echo "wt-ls: warning: fetching the pull requests' heads from $CURRENT_REMOTE_NAME failed; their ahead/behind may be stale." >&2
+	fi
+	if PULL_HEADS="$(git -C "$MAIN_WT" ls-remote "$CURRENT_REMOTE_NAME" "${PULL_REFS[@]}" 2>/dev/null)"; then
+		PULL_FETCH_OK=1
+	fi
 fi
 
 # 0 if <branch> exists on the remote, 1 if not, 2 if the remote could not be
@@ -238,8 +263,10 @@ untracked_count() {
 # Only call this when the remote branch exists and the folder is present;
 # otherwise the caller supplies its own "n/a (...)" text.
 ahead_behind() {
-	local path="$1" counts ahead behind
-	if counts="$(git -C "$path" rev-list --left-right --count HEAD...@{u} 2>/dev/null)"; then
+	local path="$1" ref="${2:-}" counts ahead behind
+	# Against <ref> when given (a pull request's latest commit), else the upstream
+	[ -n "$ref" ] || ref='@{u}'
+	if counts="$(git -C "$path" rev-list --left-right --count "HEAD...$ref" 2>/dev/null)"; then
 		read -r ahead behind <<< "$counts"
 		if [ "${ahead:-0}" -eq 0 ] && [ "${behind:-0}" -eq 0 ]; then
 			AB_TEXT="up to date"
@@ -284,6 +311,7 @@ for i in "${!paths[@]}"; do
 	if [ -n "$branch" ]; then
 		bdisp="$branch"
 		remote_name="$(git -C "$MAIN_WT" config "branch.${branch}.remote" 2>/dev/null || true)"
+		pull_sha=""
 		if [ -z "$remote_name" ]; then
 			remote="-"
 			remote_state="none"
@@ -291,6 +319,19 @@ for i in "${!paths[@]}"; do
 			# Tracks a remote we did not query; don't claim it exists.
 			remote="${remote_name}/${branch} (unverified)"
 			remote_state="unknown"
+		elif pull_number="$(pull_ref_number "$branch")"; then
+			# A pull request's head: there while the PR is (merged and closed ones too)
+			remote="${remote_name} PR #${pull_number}"
+			if [ "$PULL_FETCH_OK" != "1" ]; then
+				remote_state="unknown"; remote="${remote} (unverified)"
+			else
+				pull_sha="$(awk -v ref="refs/pull/$pull_number/head" '$2 == ref { print $1 }' <<< "$PULL_HEADS")"
+				if [ -n "$pull_sha" ]; then
+					remote_state="exists"
+				else
+					remote_state="deleted"; remote="${remote} (deleted)"
+				fi
+			fi
 		else
 			remote="${remote_name}/${branch}"
 			remote_branch_exists "$branch"
@@ -320,7 +361,7 @@ for i in "${!paths[@]}"; do
 	if [ ! -d "$path" ]; then
 		ab="n/a (missing folder)"; ab_state="n/a"
 	elif [ "$remote_state" = "exists" ]; then
-		ahead_behind "$path"
+		if [ -n "$pull_sha" ]; then ahead_behind "$path" "$pull_sha"; else ahead_behind "$path"; fi
 		ab="$AB_TEXT"; ab_state="$AB_STATE"
 	elif [ "$remote_state" = "deleted" ]; then
 		ab="n/a (remote deleted)"; ab_state="n/a"

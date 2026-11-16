@@ -15,37 +15,59 @@ CURRENT_DEV_BRANCH="${CURRENT_DEV_BRANCH:-main}"
 # --strict: only a branch that's on the remote (or a merged PR's head, below) - never a new branch
 # from CURRENT_DEV_BRANCH, for a tool that wants a PR's branch and would otherwise get an empty
 # one. (No branch name starts with -, so anything that does is an option.)
+#
+# --pr <number>: the pull request's branch, whatever it's called - its own branch when it's this
+# repo's (as --strict would), or for a fork's, its pull ref (refs/pull/<number>/head) in a branch
+# and folder named pr-<number> tracking it, as gh pr checkout does. So a tool can check out any
+# PR with one command, and a fork's branch name is never taken for this repo's.
 STRICT=0
 REMOTE_BRANCH_NAME=""
-for arg in "$@"; do
-	case "$arg" in
+PR_NUMBER=""
+usage() {
+	echo "Usage: wt-add [--strict] <branch-name>, or wt-add --pr <number>" >&2
+	exit 1
+}
+while [ $# -gt 0 ]; do
+	case "$1" in
 		--strict) STRICT=1 ;;
+		--pr)
+			[ $# -ge 2 ] || usage
+			PR_NUMBER="$2"
+			shift
+			case "$PR_NUMBER" in
+				'' | *[!0-9]*)
+					echo "wt-add: --pr takes a pull request's number, not '$PR_NUMBER'" >&2
+					exit 1
+					;;
+			esac
+			;;
 		-*)
-			echo "wt-add: unknown option $arg" >&2
+			echo "wt-add: unknown option $1" >&2
 			exit 1
 			;;
 		*)
-			if [ -n "$REMOTE_BRANCH_NAME" ]; then
-				echo "Usage: wt-add [--strict] <branch-name>" >&2
-				exit 1
-			fi
-			REMOTE_BRANCH_NAME="$arg"
+			[ -z "$REMOTE_BRANCH_NAME" ] || usage
+			REMOTE_BRANCH_NAME="$1"
 			;;
 	esac
+	shift
 done
-LOCAL_BRANCH_NAME="${REMOTE_BRANCH_NAME//\//_}"
-
-if [ -z "$REMOTE_BRANCH_NAME" ]; then
-	echo "Usage: wt-add [--strict] <branch-name>"
+if [ -n "$PR_NUMBER" ] && [ -n "$REMOTE_BRANCH_NAME" ]; then
+	echo "wt-add: give a branch or --pr <number>, not both" >&2
 	exit 1
 fi
+[ -n "$REMOTE_BRANCH_NAME" ] || [ -n "$PR_NUMBER" ] || usage
 
 # refuse_new_branch <code> <why>: With --strict, stop here, having made nothing - exit 3 when the
 # branch isn't on the remote, 4 when that couldn't be found out (so a tool can tell a gone branch
-# from a network problem).
+# from a network problem). (With --pr, a gone branch has already gone to its pull ref.)
 refuse_new_branch() {
 	[ "$STRICT" = 1 ] || return 0
-	echo "wt-add: $2 - with --strict, no new branch is made. (Without it, wt add makes '$REMOTE_BRANCH_NAME' from $CURRENT_DEV_BRANCH.)" >&2
+	if [ -n "$PR_NUMBER" ]; then
+		echo "wt-add: $2 - the branch of PR #$PR_NUMBER, so nothing was made." >&2
+	else
+		echo "wt-add: $2 - with --strict, no new branch is made. (Without it, wt add makes '$REMOTE_BRANCH_NAME' from $CURRENT_DEV_BRANCH.)" >&2
+	fi
 	exit "$1"
 }
 
@@ -62,6 +84,117 @@ cd "$WT_WORKTREE_REPO_LOCATION" || exit 1
 # setup_worktree_symlinks)
 source "$(cd "$(dirname "$0")" && pwd)/wt-common.sh"
 
+# add_pull_ref: PR_NUMBER's pull ref in pr-<number>, a branch tracking it (as gh pr checkout sets up
+# a fork's PR, so git pull and wt ls follow the PR), checked out in a folder of that name with the
+# shared links. Exit 3 when the remote has no such pull ref, 4 when it can't be asked.
+add_pull_ref() {
+	local name="pr-$PR_NUMBER" ref="refs/pull/$PR_NUMBER/head" folder found sha held
+	folder="$WT_WORKTREE_REPO_LOCATION/$name"
+	if [ -e "$folder/.git" ]; then
+		if held="$(other_branch_in "$folder" "$name")"; then
+			echo "wt-add: the folder $name already holds branch $held, not $name" >&2
+			exit 1
+		fi
+		echo "Worktree folder $name already exists. Switching to it..."
+		tell_folder "$folder"
+		exit 0
+	fi
+	if [ -e "$folder" ]; then
+		echo "wt-add: a folder named $name already exists at $folder but is not a git worktree. Aborting so nothing is overwritten." >&2
+		exit 1
+	fi
+	if ! found="$(git -C "$MAIN_WT" ls-remote "$CURRENT_REMOTE_NAME" "$ref")"; then
+		echo "wt-add: couldn't ask $CURRENT_REMOTE_NAME for $ref, PR #$PR_NUMBER's head, so nothing was made." >&2
+		exit 4
+	fi
+	if [ -z "$found" ]; then
+		echo "wt-add: $CURRENT_REMOTE_NAME has no $ref - is #$PR_NUMBER a pull request of this repo? Nothing was made." >&2
+		exit 3
+	fi
+	if ! sha="$(fetch_pr_head "$PR_NUMBER")"; then
+		echo "wt-add: couldn't fetch $ref, PR #$PR_NUMBER's head, so nothing was made." >&2
+		exit 4
+	fi
+	if git -C "$MAIN_WT" show-ref --verify --quiet "refs/heads/$name"; then
+		# Made before (its folder since removed): checked out as it is, as for a branch's name
+		echo "Branch $name already exists. Creating its worktree..."
+		git -C "$MAIN_WT" worktree add "$folder" "$name" || exit 1
+	else
+		echo "Creating $name from PR #$PR_NUMBER's head (${sha:0:7}), tracking $ref on $CURRENT_REMOTE_NAME..."
+		git -C "$MAIN_WT" worktree add --no-track -b "$name" "$folder" "$sha" || exit 1
+		git -C "$MAIN_WT" config "branch.$name.remote" "$CURRENT_REMOTE_NAME"
+		git -C "$MAIN_WT" config "branch.$name.merge" "$ref"
+	fi
+	cd "$folder" || exit 1
+	echo "Worktree folder $name created and PR #$PR_NUMBER checked out."
+	push_hint
+	tell_folder "$folder"
+	setup_worktree_symlinks
+	exit 0
+}
+
+# fork_url <owner/repo>: The fork's address, written like the remote's (https, ssh:// or
+# git@host:owner/repo), so git pushes to it the way it pushes to the remote. (As set, not after any
+# url.<x>.insteadOf rewrite - git rewrites the fork's the same way when pushing.)
+fork_url() {
+	local url
+	url="$(git -C "$MAIN_WT" config --get "remote.$CURRENT_REMOTE_NAME.url" 2>/dev/null)" || return 1
+	url="${url%/}"
+	url="${url%.git}"
+	case "$url" in
+		*://*) printf '%s/%s.git' "${url%/*/*}" "$1" ;;
+		*:*) printf '%s:%s.git' "${url%%:*}" "$1" ;;
+		*) return 1 ;;
+	esac
+}
+
+# push_hint: For a fork's PR whose author lets maintainers push to it, how to add commits to the
+# PR - pushing pr-<number> to the fork's branch. (Not set up for git push itself: that needs the
+# fork as a remote, with a push mapping per PR, as pr-<number> isn't the fork's branch name.)
+push_hint() {
+	local url
+	[ "${pr_can_modify:-}" = true ] && [ -n "${pr_head_repo:-}" ] && [ "$pr_head_repo" != / ] || return 0
+	url="$(fork_url "$pr_head_repo")" || return 0
+	echo "PR #$PR_NUMBER's author lets maintainers push to it. To add your commits to the PR:"
+	echo "  git push $url HEAD:refs/heads/$pr_head"
+}
+
+# --pr: ask gh which branch the PR is from, and whether it's a fork's. One from a branch named as
+# its base (a fork's main into main) is a fork's too: this repo's branch of that name is the base.
+# A number GitHub has no pull request for is exit 3, like a branch that isn't there; gh failing
+# otherwise (offline, not logged in) is 4. (gh's message is kept to tell them apart, and shown.)
+if [ -n "$PR_NUMBER" ]; then
+	gh_error="$(mktemp "${TMPDIR:-/tmp}/wt-gh.XXXXXX")" || exit 1
+	# Removed however this ends, Ctrl-C too
+	trap 'rm -f "$gh_error"' EXIT
+	trap 'exit 130' INT
+	pr_info="$(cd "$MAIN_WT" && {
+		if [ -n "${WT_REPO_SLUG:-}" ]; then set -- --repo "$WT_REPO_SLUG"; else set --; fi
+		gh pr view "$PR_NUMBER" "$@" \
+			--json isCrossRepository,baseRefName,maintainerCanModify,headRepositoryOwner,headRepository,headRefName \
+			--jq '"\(.isCrossRepository)\t\(.baseRefName)\t\(.maintainerCanModify)\t\(.headRepositoryOwner.login // "")/\(.headRepository.name // "")\t\(.headRefName)"' \
+			2>"$gh_error"
+	})" || pr_info=""
+	cat "$gh_error" >&2
+	if [ -z "$pr_info" ]; then
+		if grep -q "Could not resolve to a PullRequest" "$gh_error"; then
+			echo "wt-add: GitHub has no pull request #$PR_NUMBER in this repo, so nothing was made." >&2
+			exit 3
+		fi
+		echo "wt-add: couldn't ask gh about PR #$PR_NUMBER (above), so nothing was made." >&2
+		exit 4
+	fi
+	rm -f "$gh_error"
+	IFS=$'\t' read -r pr_fork pr_base pr_can_modify pr_head_repo pr_head <<< "$pr_info"
+	if [ "$pr_fork" = true ] || [ -z "$pr_head" ] || [ "$pr_head" = "$pr_base" ]; then
+		add_pull_ref
+	fi
+	# This repo's branch: as wt add --strict <branch>, but to the pull ref if the branch is gone
+	REMOTE_BRANCH_NAME="$pr_head"
+	STRICT=1
+fi
+LOCAL_BRANCH_NAME="${REMOTE_BRANCH_NAME//\//_}"
+
 # Guard: if the worktree folder already exists, don't try to re-create it
 # (git worktree add -b would fail with "branch already exists" and then
 # cascade into cd/ln errors). Re-run = switch into it; stray folder = abort.
@@ -73,6 +206,7 @@ if [ -e "$worktree_path/.git" ]; then
 		exit 1
 	fi
 	echo "Worktree folder $LOCAL_BRANCH_NAME already exists. Switching to it..."
+	tell_folder "$worktree_path"
 	exit 0
 fi
 if [ -e "$worktree_path" ]; then
@@ -100,6 +234,8 @@ if [ -n "$remote_head" ]; then
 		git -C "$MAIN_WT" worktree add --track -b "$REMOTE_BRANCH_NAME" "$worktree_path" "$CURRENT_REMOTE_NAME/$REMOTE_BRANCH_NAME"
 	fi
 else
+	# With --pr, a branch deleted after its PR was merged or closed: its pull ref
+	[ -n "$PR_NUMBER" ] && add_pull_ref
 	# Branch not on the remote. Before creating a fresh local branch, check
 	# whether it was a previously-merged PR (deleted after squash merge). If so,
 	# recover the PR head commit in a detached worktree for review.
@@ -113,6 +249,7 @@ else
 			git -C "$MAIN_WT" worktree add --detach "$worktree_path" "$pr_head_sha"
 			echo "Checked out PR #$pr_number head (${pr_head_sha:0:7}) in $LOCAL_BRANCH_NAME for review."
 			cd "$WT_WORKTREE_REPO_LOCATION/$LOCAL_BRANCH_NAME"
+			tell_folder "$worktree_path"
 			setup_worktree_symlinks
 			exit 0
 		else
@@ -137,4 +274,5 @@ if [ ! -d "$WT_WORKTREE_REPO_LOCATION/$LOCAL_BRANCH_NAME" ]; then
 fi
 cd "$WT_WORKTREE_REPO_LOCATION/$LOCAL_BRANCH_NAME"
 echo "Worktree folder $LOCAL_BRANCH_NAME created and branch checked out."
+tell_folder "$worktree_path"
 setup_worktree_symlinks

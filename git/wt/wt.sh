@@ -83,28 +83,49 @@ if [ "$_wt_sourced" = "1" ]; then
         # with -). With none, ask for it: a name pasted at the prompt is read as typed, whereas on
         # the command line the shell would act on characters like & or ; before wt saw them
         # An option wt doesn't know is left to the script to refuse, before asking for a branch
-        # that would go unused.
-        local arg branch="" unknown=""
+        # that would go unused. `wt add --pr <number>` (and cd) needs no branch: the script finds it.
+        local arg branch="" unknown="" pr="" wants_number=""
         for arg in "$@"; do
+          if [ -n "$wants_number" ]; then
+            wants_number=""
+            continue
+          fi
           case "$arg" in
-            -*) [ "$sub $arg" = "add --strict" ] || unknown=1 ;;
+            -*)
+              case "$sub $arg" in
+                "add --strict") ;;
+                "add --pr" | "cd --pr") pr=1; wants_number=1 ;;
+                *) unknown=1 ;;
+              esac
+              ;;
             *) branch="$arg" ;;
           esac
         done
-        if [ -z "$branch" ] && [ -z "$unknown" ]; then
+        if [ -z "$branch" ] && [ -z "$pr" ] && [ -z "$unknown" ]; then
           printf 'Branch name: ' >&2
           read -r branch || return 1
           [ -n "$branch" ] || { echo "wt $sub: no branch name given" >&2; return 1; }
           set -- "$@" "$branch"
         fi
-        # Where the folder is: beside main when run there (as the dispatch below decides too),
-        # else in WT_WORKTREE_REPO_LOCATION
-        local location
+        # Where the folder is: the one the script names in WT_CD_FILE (for --pr, only it knows);
+        # else the branch's, beside main when run there (as the dispatch below decides too), else
+        # in WT_WORKTREE_REPO_LOCATION
+        local location cd_file folder="" code=0
         location="$(_wt_main_location)" || location="${WT_WORKTREE_REPO_LOCATION:-}"
+        cd_file="$(mktemp "${TMPDIR:-/tmp}/wt-cd.XXXXXX" 2>/dev/null)" || cd_file=""
+        WT_CD_FILE="$cd_file" bash "$WT_DIR/wt.sh" "$sub" "$@" || code=$?
+        if [ -n "$cd_file" ]; then
+          folder="$(cat "$cd_file" 2>/dev/null)"
+          rm -f "$cd_file"
+        fi
         # On failure, the script's own exit code (like --strict's 3 and 4), for a tool that runs wt
         # in an interactive shell and so gets this function
-        bash "$WT_DIR/wt.sh" "$sub" "$@" || return
-        cd "$location/${branch//\//_}"
+        [ "$code" -eq 0 ] || return "$code"
+        if [ -n "$folder" ]; then
+          cd "$folder"
+        elif [ -n "$branch" ]; then
+          cd "$location/${branch//\//_}"
+        fi
         ;;
       *)
         bash "$WT_DIR/wt.sh" "$sub" "$@"
@@ -202,11 +223,20 @@ Commands:
                                        can't be asked (exit 4), rather than
                                        making a new branch from
                                        CURRENT_DEV_BRANCH
+  add --pr <number>       The same for a pull request, its branch found by gh:
+                          this repo's branch, or for a fork's PR (or a branch
+                          since deleted) its pull ref in pr-<number>, tracking
+                          refs/pull/<number>/head. Makes nothing when there's
+                          no such PR or its head isn't on the remote (exit 3),
+                          or gh or the remote can't be asked (exit 4)
   cd <branch>             Go to a worktree, then cd into it. If the worktree
                           does not exist yet, it is created first by running
                           the full `wt add <branch>` (same remote-branch /
                           squash-merge-PR recovery, symlinks, and workspace
-                          linking), then cd's into it.
+                          linking), then cd's into it. A pr-<number> branch
+                          (from add --pr) fetches its pull request's head.
+  cd --pr <number>        The same for a pull request: its folder, made by
+                          add --pr if it isn't there yet.
                           For add and cd, leave out <branch> to be asked for
                           it: paste a name with characters like & ; ( ) there,
                           or put it in single quotes on the command line.

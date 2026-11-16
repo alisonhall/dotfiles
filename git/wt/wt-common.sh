@@ -1,10 +1,31 @@
 #!/usr/bin/env bash
 # wt-common.sh — shared helpers for the wt-*.sh scripts.
-# Sourced (not executed) by wt-add.sh, wt-cd.sh, wt-clean.sh, wt-link.sh and wt-rm.sh.
+# Sourced (not executed) by wt-add.sh, wt-cd.sh, wt-clean.sh, wt-link.sh, wt-ls.sh and wt-rm.sh.
 #
 # These helpers read globals set by the calling script before they are invoked:
 #   WT_WORKTREE_REPO_LOCATION, MAIN_WT, CURRENT_REMOTE_NAME, REMOTE_BRANCH_NAME,
 #   LOCAL_BRANCH_NAME
+
+# pull_ref_number <branch>: If <branch> follows a pull request's head, refs/pull/<n>/head (as
+# wt add --pr and gh pr checkout set up a fork's PR), prints <n> and succeeds. Such a branch isn't
+# on the remote under its own name, so it's fetched, compared and looked up by its PR instead.
+pull_ref_number() {
+	local merge number
+	merge="$(git -C "$MAIN_WT" config "branch.$1.merge" 2>/dev/null)" || return 1
+	case "$merge" in refs/pull/*/head) ;; *) return 1 ;; esac
+	number="${merge#refs/pull/}"
+	number="${number%/head}"
+	case "$number" in '' | *[!0-9]*) return 1 ;; esac
+	printf '%s' "$number"
+}
+
+# tell_folder <folder>: For the wt function, which moves your terminal into the folder once the
+# script finishes, and can't always work it out itself (with --pr, only the script knows the
+# branch). Only when it asks, with WT_CD_FILE.
+tell_folder() {
+	[ -n "${WT_CD_FILE:-}" ] || return 0
+	printf '%s\n' "$1" > "$WT_CD_FILE"
+}
 
 # Echo the number of a merged PR whose head was $REMOTE_BRANCH_NAME, or nothing
 # (when gh is unavailable or no such PR matches). GitHub keeps every PR's head

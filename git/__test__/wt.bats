@@ -30,7 +30,11 @@ setup() {
 	# existing branch's was merged at its current commit (a branch that doesn't exist yet has
 	# none). Asked for merged ones only (wt add and wt cd), it lists those in FAKE_MERGED_PRS
 	# ("<branch>=<number> ..."), as "<number><TAB><branch>" lines like find_merged_pr's --jq
-	# makes. Like the real gh, it needs --repo outside a clone.
+	# makes. Like the real gh, it needs --repo outside a clone. Asked to view a pull request (wt add
+	# --pr), it answers from FAKE_PRS ("<number>:<from a fork: true|false>:<base>:<head>[:<the
+	# fork, owner/repo, when its author lets maintainers push>] ..."), as wt-add's --jq makes them,
+	# and fails for any other number. Asked for its state (wt clean), any PR whose head is on the
+	# "GitHub" repo was merged at that commit, unless it's in FAKE_OPEN_PRS ("<number> ...").
 	mkdir -p "$BATS_TEST_TMPDIR/bin"
 	cat > "$BATS_TEST_TMPDIR/bin/gh" <<-'EOF'
 		#!/usr/bin/env bash
@@ -40,6 +44,30 @@ setup() {
 			"repo view")
 				git rev-parse --git-dir >/dev/null 2>&1 || exit 1
 				echo acme/shop
+				;;
+			"pr view")
+				# FAKE_GH_OFFLINE: as when GitHub can't be reached
+				[ -n "${FAKE_GH_OFFLINE:-}" ] && { echo "error connecting to api.github.com" >&2; exit 1; }
+				[ "$4" = --repo ] && [ "$5" != acme/shop ] && { echo "no such pull request" >&2; exit 1; }
+				if [[ " $* " == *" number,state,headRefOid "* ]]; then
+					oid="$(git -C "$WT_WORKTREE_REPO_LOCATION/main" ls-remote origin "refs/pull/$3/head" | cut -f1)"
+					[ -n "$oid" ] || { echo "GraphQL: Could not resolve to a PullRequest with the number of $3." >&2; exit 1; }
+					state=MERGED
+					[[ " ${FAKE_OPEN_PRS:-} " == *" $3 "* ]] && state=OPEN
+					printf '%s\t%s\t%s\n' "$3" "$state" "$oid"
+					exit 0
+				fi
+				for pr in ${FAKE_PRS:-}; do
+					IFS=: read -r number fork base head pushable <<< "$pr"
+					if [ "$number" = "$3" ]; then
+						can_modify=false
+						[ -n "$pushable" ] && can_modify=true
+						printf '%s\t%s\t%s\t%s\t%s\n' "$fork" "$base" "$can_modify" "${pushable:-forker/shop}" "$head"
+						exit 0
+					fi
+				done
+				echo "GraphQL: Could not resolve to a PullRequest with the number of $3." >&2
+				exit 1
 				;;
 			"pr list")
 				repo="" state="" head=""
@@ -457,6 +485,32 @@ fail_rename_back() {
 
 # deleted_after_merge <branch> <number>: A branch that was pushed, merged as pull request
 # <number>, and then deleted, from GitHub and from the clone. Prints its last commit.
+# fork_pr <number>: A commit only at refs/pull/<number>/head on the "GitHub" repo, as a fork's
+# pull request's head is (its branch is in the fork). Prints the commit.
+fork_pr() {
+	local sha
+	git -C "$MAIN" switch -q -c "fork-work-$1"
+	git -C "$MAIN" commit -q --allow-empty -m "a fork's work for #$1"
+	sha="$(git -C "$MAIN" rev-parse HEAD)"
+	git -C "$MAIN" push -q origin "HEAD:refs/pull/$1/head" 2>/dev/null
+	git -C "$MAIN" switch -q main
+	git -C "$MAIN" branch -q -D "fork-work-$1"
+	echo "$sha"
+}
+
+# pr_commit <number>: A new commit on pull request <number>'s head, as its author pushing more.
+# Prints the commit.
+pr_commit() {
+	local sha
+	git -C "$MAIN" switch -q --detach "$(git -C "$BATS_TEST_TMPDIR/origin.git" rev-parse "refs/pull/$1/head")" 2>/dev/null ||
+		{ git -C "$MAIN" fetch -q origin "refs/pull/$1/head" && git -C "$MAIN" switch -q --detach FETCH_HEAD; }
+	git -C "$MAIN" commit -q --allow-empty -m "more work on #$1"
+	sha="$(git -C "$MAIN" rev-parse HEAD)"
+	git -C "$MAIN" push -q origin "HEAD:refs/pull/$1/head" 2>/dev/null
+	git -C "$MAIN" switch -q main
+	echo "$sha"
+}
+
 deleted_after_merge() {
 	local sha
 	git -C "$MAIN" switch -q -c "$1"
@@ -668,6 +722,191 @@ deleted_after_merge() {
 	[ "$(ls "$WT_WORKTREE_REPO_LOCATION")" = main ]
 }
 
+@test "wt add --pr checks out a fork's pull request as pr-<number>, tracking its pull ref, with the shared links" {
+	sha="$(fork_pr 13)"
+	export FAKE_PRS="13:true:main:feature/a"
+	# This repo's feature/a is another branch, not the fork's
+	git -C "$MAIN" push -q origin main:refs/heads/feature/a 2>/dev/null
+	run bash "$WT/wt.sh" add --pr 13
+	[ "$status" -eq 0 ]
+	folder="$WT_WORKTREE_REPO_LOCATION/pr-13"
+	[ "$(git -C "$folder" branch --show-current)" = pr-13 ]
+	[ "$(git -C "$folder" rev-parse HEAD)" = "$sha" ]
+	[ "$(git -C "$MAIN" config branch.pr-13.remote)" = origin ]
+	[ "$(git -C "$MAIN" config branch.pr-13.merge)" = refs/pull/13/head ]
+	[ "$folder/node_modules" -ef "$MAIN/node_modules" ]
+	[ ! -e "$WT_WORKTREE_REPO_LOCATION/feature_a" ]
+	# Again: it's there already
+	run bash "$WT/wt.sh" add --pr 13
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"Worktree folder pr-13 already exists"* ]] || false
+	# Its folder removed, the branch is checked out as it is
+	git -C "$MAIN" worktree remove --force "$folder"
+	run bash "$WT/wt.sh" add --pr 13
+	[ "$status" -eq 0 ]
+	[ "$(git -C "$folder" branch --show-current)" = pr-13 ]
+}
+
+@test "wt add --pr takes a pull request from a branch named as its base for a fork's" {
+	sha="$(fork_pr 14)"
+	export FAKE_PRS="14:false:main:main"
+	run bash "$WT/wt.sh" add --pr 14
+	[ "$status" -eq 0 ]
+	[ "$(git -C "$WT_WORKTREE_REPO_LOCATION/pr-14" rev-parse HEAD)" = "$sha" ]
+}
+
+@test "wt add --pr checks out this repo's pull request's own branch, or its pull ref once the branch is deleted" {
+	git -C "$MAIN" push -q origin main:refs/heads/feature/a 2>/dev/null
+	gone="$(deleted_after_merge feature/gone 7)"
+	export FAKE_PRS="12:false:main:feature/a 7:false:main:feature/gone"
+	run bash "$WT/wt.sh" add --pr 12
+	[ "$status" -eq 0 ]
+	[ "$(git -C "$WT_WORKTREE_REPO_LOCATION/feature_a" rev-parse --abbrev-ref '@{upstream}')" = origin/feature/a ]
+	run bash "$WT/wt.sh" add --pr 7
+	[ "$status" -eq 0 ]
+	[ "$(git -C "$WT_WORKTREE_REPO_LOCATION/pr-7" rev-parse HEAD)" = "$gone" ]
+	[ "$(git -C "$MAIN" config branch.pr-7.merge)" = refs/pull/7/head ]
+	[ ! -e "$WT_WORKTREE_REPO_LOCATION/feature_gone" ]
+}
+
+@test "wt add --pr makes nothing when the pull request's head isn't there or can't be asked for" {
+	# gh knows the pull request, but GitHub has no pull ref for it
+	export FAKE_PRS="13:true:main:feature/a"
+	run bash "$WT/wt.sh" add --pr 13
+	[ "$status" -eq 3 ]
+	[[ "$output" == *"origin has no refs/pull/13/head"* ]] || false
+	# GitHub has no such pull request
+	run bash "$WT/wt.sh" add --pr 99
+	[ "$status" -eq 3 ]
+	[[ "$output" == *"Could not resolve to a PullRequest"* ]] || false
+	[[ "$output" == *"GitHub has no pull request #99 in this repo"* ]] || false
+	# gh can't reach GitHub
+	FAKE_GH_OFFLINE=1 run bash "$WT/wt.sh" add --pr 13
+	[ "$status" -eq 4 ]
+	[[ "$output" == *"error connecting to api.github.com"* ]] || false
+	[[ "$output" == *"couldn't ask gh about PR #13"* ]] || false
+	# GitHub can't be asked
+	fork_pr 13 >/dev/null
+	git -C "$MAIN" remote set-url origin "$BATS_TEST_TMPDIR/nowhere.git"
+	run bash "$WT/wt.sh" add --pr 13
+	[ "$status" -eq 4 ]
+	[[ "$output" == *"couldn't ask origin for refs/pull/13/head"* ]] || false
+	# This repo's branch, GitHub not answering
+	export FAKE_PRS="12:false:main:feature/a"
+	run bash "$WT/wt.sh" add --pr 12
+	[ "$status" -eq 4 ]
+	[[ "$output" == *"the branch of PR #12, so nothing was made"* ]] || false
+	[ "$(ls "$WT_WORKTREE_REPO_LOCATION")" = main ]
+}
+
+@test "wt add --pr refuses a number that isn't one, a missing one, and a branch as well" {
+	run bash "$WT/wt.sh" add --pr abc
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"--pr takes a pull request's number, not 'abc'"* ]] || false
+	run bash "$WT/wt.sh" add --pr
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"Usage: wt-add"* ]] || false
+	run bash "$WT/wt.sh" add --pr 12 feature/a
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"give a branch or --pr <number>, not both"* ]] || false
+	[ "$(ls "$WT_WORKTREE_REPO_LOCATION")" = main ]
+}
+
+@test "wt add --pr says how to push to a fork's pull request whose author lets maintainers, and only then" {
+	fork_pr 13 >/dev/null
+	fork_pr 14 >/dev/null
+	# The remote as GitHub's address, https or ssh (git still reaching the local "GitHub" repo,
+	# by a path Windows' git can read)
+	origin="$BATS_TEST_TMPDIR/origin.git"
+	if is_windows; then origin="$(cygpath -m "$origin")"; fi
+	git -C "$MAIN" config "url.$origin.insteadOf" https://github.com/acme/shop.git
+	git -C "$MAIN" config --add "url.$origin.insteadOf" git@github.com:acme/shop.git
+	git -C "$MAIN" remote set-url origin https://github.com/acme/shop.git
+	export FAKE_PRS="13:true:main:feature/a:forker/shop 14:true:main:feature/b"
+	run bash "$WT/wt.sh" add --pr 13
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"PR #13's author lets maintainers push to it"* ]] || false
+	[[ "$output" == *"git push https://github.com/forker/shop.git HEAD:refs/heads/feature/a"* ]] || false
+	run bash "$WT/wt.sh" add --pr 14
+	[ "$status" -eq 0 ]
+	[[ "$output" != *"git push"* ]] || false
+	# Written like the remote's address: ssh's too
+	git -C "$MAIN" remote set-url origin git@github.com:acme/shop.git
+	fork_pr 15 >/dev/null
+	export FAKE_PRS="15:true:main:feature/c:forker/shop"
+	run bash "$WT/wt.sh" add --pr 15
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"git push git@github.com:forker/shop.git HEAD:refs/heads/feature/c"* ]] || false
+}
+
+@test "wt add --pr leaves no temporary files behind" {
+	export TMPDIR="$BATS_TEST_TMPDIR/tmp"
+	mkdir -p "$TMPDIR"
+	fork_pr 13 >/dev/null
+	export FAKE_PRS="13:true:main:feature/a"
+	bash "$WT/wt.sh" add --pr 13 >/dev/null 2>&1
+	bash "$WT/wt.sh" add --pr 99 >/dev/null 2>&1 || true
+	FAKE_GH_OFFLINE=1 bash "$WT/wt.sh" add --pr 98 >/dev/null 2>&1 || true
+	bash "$WT/wt.sh" cd --pr 13 >/dev/null 2>&1
+	[ -z "$(ls -A "$TMPDIR")" ]
+}
+
+@test "wt ls shows a pr-<number> branch's pull request, and how far behind its latest commit it is" {
+	fork_pr 13 >/dev/null
+	export FAKE_PRS="13:true:main:feature/a"
+	bash "$WT/wt.sh" add --pr 13 >/dev/null 2>&1
+	run bash "$WT/wt.sh" ls
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"origin PR #13"* ]] || false
+	[[ "$output" == *"2 exists, 0 deleted"* ]] || false
+	# Its author pushes more: one behind, once fetched
+	pr_commit 13 >/dev/null
+	run bash "$WT/wt.sh" ls
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"ahead 0, behind 1"* ]] || false
+}
+
+@test "wt cd fetches a pr-<number> branch's pull request, and wt cd --pr goes to its folder, made if need be" {
+	fork_pr 13 >/dev/null
+	fork_pr 15 >/dev/null
+	export FAKE_PRS="13:true:main:feature/a 15:true:main:feature/c"
+	bash "$WT/wt.sh" add --pr 13 >/dev/null 2>&1
+	sha="$(pr_commit 13)"
+	run bash "$WT/wt.sh" cd pr-13
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"Fetched PR #13's latest commits"* ]] || false
+	[[ "$output" != *"not found"* ]] || false
+	git -C "$WT_WORKTREE_REPO_LOCATION/pr-13" pull -q --ff-only
+	[ "$(git -C "$WT_WORKTREE_REPO_LOCATION/pr-13" rev-parse HEAD)" = "$sha" ]
+	# By its number, through the function: there already, and made
+	run bash -c '. "$1/wt.sh" && wt cd --pr 13 </dev/null >/dev/null && pwd' _ "$WT"
+	[ "$status" -eq 0 ]
+	[ "${lines[$((${#lines[@]} - 1))]}" -ef "$WT_WORKTREE_REPO_LOCATION/pr-13" ]
+	run bash -c '. "$1/wt.sh" && wt cd --pr 15 </dev/null >/dev/null && pwd' _ "$WT"
+	[ "$status" -eq 0 ]
+	[ "${lines[$((${#lines[@]} - 1))]}" -ef "$WT_WORKTREE_REPO_LOCATION/pr-15" ]
+	# A number that isn't one
+	run bash "$WT/wt.sh" cd --pr x
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"--pr takes a pull request's number, not 'x'"* ]] || false
+}
+
+@test "wt clean looks a pr-<number> branch's pull request up by its number: removed once merged, kept while open" {
+	fork_pr 13 >/dev/null
+	fork_pr 14 >/dev/null
+	export FAKE_PRS="13:true:main:feature/a 14:true:main:feature/b"
+	export FAKE_OPEN_PRS="14"
+	bash "$WT/wt.sh" add --pr 13 >/dev/null 2>&1
+	bash "$WT/wt.sh" add --pr 14 >/dev/null 2>&1
+	run bash "$WT/wt.sh" clean --apply
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"GONE"*"pr-13"* ]] || false
+	[[ "$output" == *"KEEP"*"pr-14"*"open PR #14"* ]] || false
+	[ ! -e "$WT_WORKTREE_REPO_LOCATION/pr-13" ]
+	! git -C "$MAIN" show-ref --verify --quiet refs/heads/pr-13
+	[ -d "$WT_WORKTREE_REPO_LOCATION/pr-14" ]
+}
+
 @test "wt add and wt cd refuse a folder that holds a different branch with the same folder name" {
 	bash "$WT/wt.sh" add feature/x >/dev/null 2>&1
 	run bash "$WT/wt.sh" add feature_x
@@ -838,6 +1077,31 @@ deleted_after_merge() {
 	command -v zsh >/dev/null 2>&1 || skip "zsh isn't installed"
 	run zsh -f -c 'cd "$2" && source "$1/wt.sh"; wt add --strict feature/typo 2>/dev/null; echo "status:$?"' _ "$WT" "$BATS_TEST_TMPDIR"
 	[ "${lines[$((${#lines[@]} - 1))]}" = "status:3" ]
+}
+
+@test "the wt function moves into the folder wt add --pr made, without asking for a branch" {
+	fork_pr 13 >/dev/null
+	git -C "$MAIN" push -q origin main:refs/heads/feature/a 2>/dev/null
+	export FAKE_PRS="13:true:main:feature/a 12:false:main:feature/a"
+	run bash -c '. "$1/wt.sh" && wt add --pr 13 </dev/null >/dev/null && pwd' _ "$WT"
+	[ "$status" -eq 0 ]
+	[ "${lines[$((${#lines[@]} - 1))]}" -ef "$WT_WORKTREE_REPO_LOCATION/pr-13" ]
+	run bash -c '. "$1/wt.sh" && wt add --pr 12 </dev/null >/dev/null && pwd' _ "$WT"
+	[ "$status" -eq 0 ]
+	[ "${lines[$((${#lines[@]} - 1))]}" -ef "$WT_WORKTREE_REPO_LOCATION/feature_a" ]
+	# Refused, it stays where it was, with the script's exit code
+	run bash -c 'cd "$2" && . "$1/wt.sh"; wt add --pr 99 </dev/null 2>/dev/null; echo "status:$?"; pwd' _ "$WT" "$BATS_TEST_TMPDIR"
+	[ "${lines[$((${#lines[@]} - 2))]}" = "status:3" ]
+	[ "${lines[$((${#lines[@]} - 1))]}" -ef "$BATS_TEST_TMPDIR" ]
+}
+
+@test "zsh's wt moves into the folder wt add --pr made too" {
+	command -v zsh >/dev/null 2>&1 || skip "zsh isn't installed"
+	fork_pr 13 >/dev/null
+	export FAKE_PRS="13:true:main:feature/a"
+	run zsh -f -c 'source "$1/wt.sh" && wt add --pr 13 </dev/null >/dev/null && pwd' _ "$WT"
+	[ "$status" -eq 0 ]
+	[ "${lines[$((${#lines[@]} - 1))]}" -ef "$WT_WORKTREE_REPO_LOCATION/pr-13" ]
 }
 
 @test "the wt function doesn't ask for a branch when an option is wrong, but says so at once" {

@@ -12,10 +12,36 @@ if [ -z "${WT_WORKTREE_REPO_LOCATION:-}" ]; then
 fi
 CURRENT_REMOTE_NAME="${CURRENT_REMOTE_NAME:-origin}"
 
+# --pr <number>: the pull request's folder, made first by wt add --pr if it isn't there (which
+# says which folder that is), then its latest commits fetched as for a branch.
+PR_NUMBER=""
+if [ "${1:-}" = --pr ]; then
+	PR_NUMBER="${2:-}"
+	case "$PR_NUMBER" in
+		'' | *[!0-9]*)
+			echo "wt-cd: --pr takes a pull request's number, not '$PR_NUMBER'" >&2
+			exit 1
+			;;
+	esac
+	[ $# -eq 2 ] || { echo "Usage: wt-cd <branch-name>, or wt-cd --pr <number>" >&2; exit 1; }
+	pr_folder_file="$(mktemp "${TMPDIR:-/tmp}/wt-cd.XXXXXX")" || exit 1
+	trap 'rm -f "$pr_folder_file"' EXIT
+	trap 'exit 130' INT
+	WT_CD_FILE="$pr_folder_file" bash "$(cd "$(dirname "$0")" && pwd)/wt-add.sh" --pr "$PR_NUMBER" || exit
+	pr_folder="$(cat "$pr_folder_file")"
+	[ -n "$pr_folder" ] || { echo "wt-cd: wt add --pr $PR_NUMBER didn't say which folder it used." >&2; exit 1; }
+	# Its branch, as named in the folder (the folder is named after it)
+	REMOTE_BRANCH_NAME="$(git -C "$pr_folder" symbolic-ref --quiet --short HEAD 2>/dev/null)" || {
+		echo "wt-cd: $pr_folder has no branch checked out." >&2
+		exit 1
+	}
+	set -- "$REMOTE_BRANCH_NAME"
+fi
+
 REMOTE_BRANCH_NAME="$1"
 LOCAL_BRANCH_NAME="${REMOTE_BRANCH_NAME//\//_}"
 
-# No options (--strict is wt add's); no branch name starts with -
+# No other options (--strict is wt add's); no branch name starts with -
 case "$REMOTE_BRANCH_NAME" in
 	-*)
 		echo "wt-cd: unknown option $REMOTE_BRANCH_NAME" >&2
@@ -24,7 +50,7 @@ case "$REMOTE_BRANCH_NAME" in
 esac
 
 if [ -z "$REMOTE_BRANCH_NAME" ]; then
-	echo "Usage: wt-cd <branch-name>"
+	echo "Usage: wt-cd <branch-name>, or wt-cd --pr <number>"
 	exit 1
 fi
 
@@ -46,6 +72,17 @@ source "$(cd "$(dirname "$0")" && pwd)/wt-common.sh"
 # branch is deleted. Exits non-zero (so the wrapper does not cd) when gh is
 # missing or no matching merged PR is found.
 fetch_branch_or_recover() {
+	local number
+	# A branch following a pull request's head (wt add --pr's pr-<number>): fetch that, as the
+	# remote has no branch of its name. git pull then brings the commits in.
+	if number="$(pull_ref_number "$REMOTE_BRANCH_NAME")"; then
+		if git fetch "$CURRENT_REMOTE_NAME" "refs/pull/$number/head" 2>/dev/null; then
+			echo "Fetched PR #$number's latest commits (git pull to apply them)."
+		else
+			echo "wt-cd: couldn't fetch refs/pull/$number/head, PR #$number's head, from $CURRENT_REMOTE_NAME. Continuing with the local branch." >&2
+		fi
+		return 0
+	fi
 	if git fetch "$CURRENT_REMOTE_NAME" "$REMOTE_BRANCH_NAME" 2>/dev/null; then
 		return 0
 	fi
@@ -117,4 +154,5 @@ if [ -e "$worktree_path/.git" ] && held="$(other_branch_in "$worktree_path" "$RE
 fi
 
 cd "$worktree_path" || exit 1
+tell_folder "$worktree_path"
 fetch_branch_or_recover
