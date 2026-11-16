@@ -264,6 +264,51 @@ merged_branch() {
 #   REMOVING BRANCH FOLDERS
 #   -------------------------------
 
+@test "wt clean --porcelain prints only the folders it would remove, and removes nothing" {
+	merged_branch feature/done
+	merged_branch feature/dirty
+	echo work > "$WT_WORKTREE_REPO_LOCATION/feature_dirty/new-file.txt"
+	out="$(bash "$WT/wt.sh" clean --porcelain 2>"$BATS_TEST_TMPDIR/report")"
+	# One line, the folder (as git writes it: C:/... on Windows), and nothing else
+	[ "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" = 1 ]
+	[ "$out" -ef "$WT_WORKTREE_REPO_LOCATION/feature_done" ]
+	# The report went to stderr
+	grep -q "RM.*feature_done" "$BATS_TEST_TMPDIR/report"
+	grep -q "KEEP.*feature_dirty" "$BATS_TEST_TMPDIR/report"
+	[ -d "$WT_WORKTREE_REPO_LOCATION/feature_done" ]
+	# None safe to remove: nothing on stdout, and still exit 0
+	rm -rf "$WT_WORKTREE_REPO_LOCATION/feature_done/node_modules"
+	echo work > "$WT_WORKTREE_REPO_LOCATION/feature_done/new-file.txt"
+	run bash -c 'bash "$1/wt.sh" clean --porcelain 2>/dev/null' _ "$WT"
+	[ "$status" -eq 0 ]
+	[ -z "$output" ]
+}
+
+@test "wt clean --porcelain's output ends when it does, not when a program it started in the background does" {
+	merged_branch feature/done
+	# A gh that leaves a program running, as git fetch can leave git's maintenance running: its own
+	# stdout and stderr elsewhere (as such a program's are), any other open file inherited
+	mv "$BATS_TEST_TMPDIR/bin/gh" "$BATS_TEST_TMPDIR/bin/gh-real"
+	printf '#!/usr/bin/env bash\n(sleep 6 </dev/null >/dev/null 2>&1 &)\nexec "%s" "$@"\n' "$BATS_TEST_TMPDIR/bin/gh-real" > "$BATS_TEST_TMPDIR/bin/gh"
+	chmod +x "$BATS_TEST_TMPDIR/bin/gh"
+	SECONDS=0
+	out="$(bash "$WT/wt.sh" clean --porcelain 2>/dev/null)"
+	took=$SECONDS
+	[ "$out" -ef "$WT_WORKTREE_REPO_LOCATION/feature_done" ]
+	[ "$took" -lt 5 ]
+}
+
+@test "wt clean --porcelain won't go with --apply, and -h works with nothing set" {
+	run bash "$WT/wt.sh" clean --porcelain --apply
+	[ "$status" -eq 2 ]
+	[[ "$output" == *"can't be used with --apply"* ]] || false
+	unset WT_WORKTREE_REPO_LOCATION WT_REPO_SLUG
+	cd "$BATS_TEST_TMPDIR"
+	run bash "$WT/wt.sh" clean -h
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"--porcelain"* ]] || false
+}
+
 @test "wt clean deletes a merged branch's folder, but not the main/node_modules its link points to" {
 	merged_branch feature/done
 	run bash "$WT/wt.sh" clean --apply

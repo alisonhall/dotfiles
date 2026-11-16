@@ -42,6 +42,9 @@
 #   wt-clean.sh --keep-branch  # remove folders but keep the local branch
 #   wt-clean.sh --older-than 30d  # only consider worktrees whose last
 #                                          # commit is older than 30d (also: 12h, 4w)
+#   wt-clean.sh --porcelain    # dry run for a tool: only the folders it would
+#                              # remove on stdout, one per line, as git lists
+#                              # them; the report goes to stderr
 #   wt-clean.sh -h             # help
 #
 set -euo pipefail
@@ -52,6 +55,72 @@ set -euo pipefail
 export GIT_PAGER=cat
 export GH_PAGER=cat
 export PAGER=cat
+
+# Options first, so -h works anywhere (and --porcelain's stdout holds only folders from the start)
+ARGS=(${@+"$@"})
+APPLY=0
+PORCELAIN=0
+KEEP_BRANCH=0
+OLDER_THAN=""        # e.g. 30d, 12h, 4w
+CUTOFF_EPOCH=""      # computed from OLDER_THAN
+
+# Convert a duration like 30d / 12h / 4w / 90 (plain = days) to an epoch cutoff.
+duration_to_cutoff() {
+  local d="$1" num unit secs
+  if [[ "$d" =~ ^([0-9]+)([smhdw])?$ ]]; then
+    num="${BASH_REMATCH[1]}"; unit="${BASH_REMATCH[2]:-d}"
+    case "$unit" in
+      s) secs=$num ;;
+      m) secs=$((num*60)) ;;
+      h) secs=$((num*3600)) ;;
+      d) secs=$((num*86400)) ;;
+      w) secs=$((num*604800)) ;;
+    esac
+    echo $(( $(date +%s) - secs ))
+  else
+    return 1
+  fi
+}
+
+while (( $# )); do
+  case "$1" in
+    --apply) APPLY=1 ;;
+    --porcelain) PORCELAIN=1 ;;
+    --keep-branch) KEEP_BRANCH=1 ;;
+    --older-than)
+      [[ -n "${2:-}" ]] || { echo "--older-than needs a value (e.g. 30d)" >&2; exit 2; }
+      OLDER_THAN="$2"; shift ;;
+    --older-than=*) OLDER_THAN="${1#*=}" ;;
+    -h|--help) sed -n '2,49p' "$0"; exit 0 ;;
+    *) echo "Unknown option: $1 (see -h)" >&2; exit 2 ;;
+  esac
+  shift
+done
+
+# --porcelain: a dry run whose stdout is only the folders, for a tool to read; everything else
+# (the report, git's and gh's own output) goes to stderr. The work is done by a second run of this
+# script with its stdout on stderr, writing the folders to a file this one prints once it's done:
+# so nothing it starts holds the real stdout, which a tool reads until every holder closes it -
+# git fetch can leave git's maintenance running after this ends, say.
+if (( PORCELAIN )); then
+  if (( APPLY )); then
+    echo "--porcelain only lists what would be removed; it can't be used with --apply" >&2
+    exit 2
+  fi
+  if [[ -z "${WT_CLEAN_PORCELAIN_LIST:-}" ]]; then
+    porcelain_list="$(mktemp "${TMPDIR:-/tmp}/wt-clean.XXXXXX")" || exit 1
+    trap 'rm -f "$porcelain_list"' EXIT
+    WT_CLEAN_PORCELAIN_LIST="$porcelain_list" bash "$0" ${ARGS[@]+"${ARGS[@]}"} >&2 || exit
+    cat "$porcelain_list"
+    exit 0
+  fi
+fi
+
+if [[ -n "$OLDER_THAN" ]]; then
+  CUTOFF_EPOCH=$(duration_to_cutoff "$OLDER_THAN") \
+    || { echo "Bad --older-than value: $OLDER_THAN (use 30d, 12h, 4w, 90m)" >&2; exit 2; }
+fi
+
 
 # Configuration is supplied by the environment (exported from
 # local/shell_local.sh, or overridden by a local file). Nothing project- or
@@ -99,48 +168,6 @@ PROTECTED=(${WT_PROTECTED_BRANCHES:-main})
 SAFE_ARTIFACTS=(node_modules .yarn .DS_Store dist build coverage .next .nuxt out .turbo .parcel-cache .vite .pytest_cache __pycache__ .eslintcache)
 if [[ -n "${WT_SAFE_ARTIFACTS:-}" ]]; then
   SAFE_ARTIFACTS+=(${WT_SAFE_ARTIFACTS})
-fi
-
-APPLY=0
-KEEP_BRANCH=0
-OLDER_THAN=""        # e.g. 30d, 12h, 4w
-CUTOFF_EPOCH=""      # computed from OLDER_THAN
-
-# Convert a duration like 30d / 12h / 4w / 90 (plain = days) to an epoch cutoff.
-duration_to_cutoff() {
-  local d="$1" num unit secs
-  if [[ "$d" =~ ^([0-9]+)([smhdw])?$ ]]; then
-    num="${BASH_REMATCH[1]}"; unit="${BASH_REMATCH[2]:-d}"
-    case "$unit" in
-      s) secs=$num ;;
-      m) secs=$((num*60)) ;;
-      h) secs=$((num*3600)) ;;
-      d) secs=$((num*86400)) ;;
-      w) secs=$((num*604800)) ;;
-    esac
-    echo $(( $(date +%s) - secs ))
-  else
-    return 1
-  fi
-}
-
-while (( $# )); do
-  case "$1" in
-    --apply) APPLY=1 ;;
-    --keep-branch) KEEP_BRANCH=1 ;;
-    --older-than)
-      [[ -n "${2:-}" ]] || { echo "--older-than needs a value (e.g. 30d)" >&2; exit 2; }
-      OLDER_THAN="$2"; shift ;;
-    --older-than=*) OLDER_THAN="${1#*=}" ;;
-    -h|--help) sed -n '2,40p' "$0"; exit 0 ;;
-    *) echo "Unknown option: $1 (see -h)" >&2; exit 2 ;;
-  esac
-  shift
-done
-
-if [[ -n "$OLDER_THAN" ]]; then
-  CUTOFF_EPOCH=$(duration_to_cutoff "$OLDER_THAN") \
-    || { echo "Bad --older-than value: $OLDER_THAN (use 30d, 12h, 4w, 90m)" >&2; exit 2; }
 fi
 
 # --- sanity checks -----------------------------------------------------------
@@ -451,6 +478,7 @@ while IFS=$'\t' read -r path branch <&3; do
     fi
   else
     printf 'RM    %-60s [%s] (would remove) [%s PR #%s]\n' "$name" "$branch" "$PR_STATE" "$PR_NUM"
+    if (( PORCELAIN )); then printf '%s\n' "$path" >> "$WT_CLEAN_PORCELAIN_LIST"; fi
   fi
   ((removed++)) || true
 
