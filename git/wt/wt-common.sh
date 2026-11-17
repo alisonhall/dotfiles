@@ -6,6 +6,18 @@
 #   WT_WORKTREE_REPO_LOCATION, MAIN_WT, CURRENT_REMOTE_NAME, REMOTE_BRANCH_NAME,
 #   LOCAL_BRANCH_NAME
 
+# Failures (see "Exit codes" in wt help): every message goes to stderr, and the last line before
+# a non-zero exit is one sentence saying what went wrong and what to do - a tool that runs wt
+# shows that line (or the first fatal:/error: line) as the reason. 1 is refused or failed, 2 is
+# usage or not configured, and wt add's 3 and 4 are a branch or PR that isn't there and a remote
+# or gh that can't be asked.
+
+# wt_not_configured <command>: Stop because wt can't tell which repo to work on (exit 2).
+wt_not_configured() {
+	echo "error: $1: WT_WORKTREE_REPO_LOCATION is not set, and this isn't a folder of wt's layout. Run it in the repo's main folder (or a branch's folder beside it), or export WT_WORKTREE_REPO_LOCATION as the folder that holds main." >&2
+	exit 2
+}
+
 # pull_ref_number <branch>: If <branch> follows a pull request's head, refs/pull/<n>/head (as
 # wt add --pr and gh pr checkout set up a fork's PR), prints <n> and succeeds. Such a branch isn't
 # on the remote under its own name, so it's fetched, compared and looked up by its PR instead.
@@ -198,7 +210,7 @@ link_workspaces() {
 	if command -v node >/dev/null 2>&1 && [ -f "$link_workspaces_script" ]; then
 		echo "Linking workspace packages to this worktree's source..."
 		node "$link_workspaces_script" "$WT_WORKTREE_REPO_LOCATION/$LOCAL_BRANCH_NAME" --relative || \
-			echo "wt: warning: link-workspaces.mjs failed; @scope/* imports may resolve to main."
+			echo "wt: warning: link-workspaces.mjs failed; @scope/* imports may resolve to main." >&2
 	else
 		echo "wt: skipping workspace linking (node or link-workspaces.mjs not found)."
 	fi
@@ -240,7 +252,7 @@ setup_worktree_symlinks() {
 			continue
 		fi
 		mkdir -p "$(dirname "$rel")"
-		make_link "$WT_WORKTREE_REPO_LOCATION/$main_rel" "$rel" || echo "  $rel: couldn't link it to $main_rel"
+		make_link "$WT_WORKTREE_REPO_LOCATION/$main_rel" "$rel" || echo "  $rel: couldn't link it to $main_rel" >&2
 	done < <(worktree_symlink_pairs)
 
 	echo "Symlinks pointing to the main worktree folder"

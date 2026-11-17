@@ -256,6 +256,22 @@ Run anywhere in `<repo-location>/main` or a branch's folder beside it, every com
 
 `wt clean` lists every folder it keeps, with the reason. It never deletes the `main` folder, whatever branch it holds, or branches in `WT_PROTECTED_BRANCHES` (`main`, unless you change it) or `CURRENT_DEV_BRANCH`.
 
+### Exit codes and errors
+
+Every command exits with:
+
+| Code | Means |
+| --- | --- |
+| `0` | Done. |
+| `1` | Refused or failed: nothing was changed, or it stopped partway and says what's left. |
+| `2` | Usage (an unknown option, a missing argument) or not configured (it's not run in a layout, and `WT_WORKTREE_REPO_LOCATION` isn't set). |
+| `3` | `wt add --strict` / `--pr`: the branch or pull request isn't there. |
+| `4` | `wt add --strict` / `--pr`: GitHub or `gh` couldn't be asked. |
+
+When a command fails, everything it says about the failure goes to stderr, and its last line is one sentence saying what went wrong and what to do, like `wt-rm: feature_login has uncommitted changes, and with no terminal to ask in, nothing was deleted. Add --yes to delete it anyway.` A tool that runs `wt` can show that line (or the first line starting `fatal:` or `error:`, which is git's own reason when git failed). Progress stays on stdout.
+
+Nothing waits for an answer when there's no terminal, as when a tool runs `wt` with no input: `wt rm` stops rather than asking (add `--yes`), and `wt add` or `wt cd` with no branch stop rather than asking for one.
+
 ## Settings
 
 The [setup script](#2-run-the-setup) writes the settings it asks about. To set others, or if you set up by hand, put them in your startup file (`~/.zshrc` or `~/.bashrc`):

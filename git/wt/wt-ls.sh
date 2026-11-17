@@ -75,7 +75,7 @@ while [ $# -gt 0 ]; do
 			exit 0
 			;;
 		*)
-			echo "wt-ls: unknown option: $1 (see -h)" >&2
+			echo "wt-ls: unknown option $1 (see wt ls -h)." >&2
 			exit 2
 			;;
 	esac
@@ -83,12 +83,10 @@ while [ $# -gt 0 ]; do
 done
 
 # (After the options, so -h works anywhere)
-if [ -z "${WT_WORKTREE_REPO_LOCATION:-}" ]; then
-	echo "error: WT_WORKTREE_REPO_LOCATION is not set." >&2
-	echo "       Export it in local/shell_local.sh (the worktree collection folder, e.g. \$HOME/Sites/fe)," >&2
-	echo "       or run wt in the repo's main folder, or a branch's folder beside it." >&2
-	exit 2
-fi
+# Shared helpers (wt_not_configured, pull_ref_number)
+source "$(cd "$(dirname "$0")" && pwd)/wt-common.sh"
+
+[ -n "${WT_WORKTREE_REPO_LOCATION:-}" ] || wt_not_configured wt-ls
 REPO_ROOT="$WT_WORKTREE_REPO_LOCATION"
 
 # The main worktree must be a valid git worktree. This works in BOTH layouts:
@@ -96,7 +94,7 @@ REPO_ROOT="$WT_WORKTREE_REPO_LOCATION"
 # layout (fe/main/.git). The collection folder itself is not a git repo in the
 # latter, so we anchor on main rather than the folder.
 if ! git -C "$REPO_ROOT/main" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-	echo "wt-ls: no git worktree found at $REPO_ROOT/main."
+	echo "wt-ls: there's no git worktree at $REPO_ROOT/main. Check WT_WORKTREE_REPO_LOCATION, or run wt in the repo's main folder." >&2
 	exit 1
 fi
 
@@ -107,9 +105,6 @@ fi
 REPO_ROOT="$(cd "$REPO_ROOT" && pwd -P)"
 # Anchor for all central git ops (see the check above).
 MAIN_WT="$REPO_ROOT/main"
-
-# Shared helpers (pull_ref_number)
-source "$(cd "$(dirname "$0")" && pwd)/wt-common.sh"
 
 # --- colour (only when stdout is a TTY and NO_COLOR is unset) ---------------
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then

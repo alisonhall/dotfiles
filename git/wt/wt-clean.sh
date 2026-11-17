@@ -88,11 +88,11 @@ while (( $# )); do
     --porcelain) PORCELAIN=1 ;;
     --keep-branch) KEEP_BRANCH=1 ;;
     --older-than)
-      [[ -n "${2:-}" ]] || { echo "--older-than needs a value (e.g. 30d)" >&2; exit 2; }
+      [[ -n "${2:-}" ]] || { echo "wt-clean: --older-than needs a value, like 30d." >&2; exit 2; }
       OLDER_THAN="$2"; shift ;;
     --older-than=*) OLDER_THAN="${1#*=}" ;;
     -h|--help) sed -n '2,49p' "$0"; exit 0 ;;
-    *) echo "Unknown option: $1 (see -h)" >&2; exit 2 ;;
+    *) echo "wt-clean: unknown option $1 (see wt clean -h)." >&2; exit 2 ;;
   esac
   shift
 done
@@ -104,7 +104,7 @@ done
 # git fetch can leave git's maintenance running after this ends, say.
 if (( PORCELAIN )); then
   if (( APPLY )); then
-    echo "--porcelain only lists what would be removed; it can't be used with --apply" >&2
+    echo "wt-clean: --porcelain only lists what would be removed, so it can't be used with --apply." >&2
     exit 2
   fi
   if [[ -z "${WT_CLEAN_PORCELAIN_LIST:-}" ]]; then
@@ -118,19 +118,16 @@ fi
 
 if [[ -n "$OLDER_THAN" ]]; then
   CUTOFF_EPOCH=$(duration_to_cutoff "$OLDER_THAN") \
-    || { echo "Bad --older-than value: $OLDER_THAN (use 30d, 12h, 4w, 90m)" >&2; exit 2; }
+    || { echo "wt-clean: --older-than takes a time like 30d, 12h, 4w or 90m, not '$OLDER_THAN'." >&2; exit 2; }
 fi
 
 
 # Configuration is supplied by the environment (exported from
 # local/shell_local.sh, or overridden by a local file). Nothing project- or
 # user-specific is hardcoded here, so the script works for any repo/machine.
-if [[ -z "${WT_WORKTREE_REPO_LOCATION:-}" ]]; then
-  echo "error: WT_WORKTREE_REPO_LOCATION is not set." >&2
-  echo "       Export it in local/shell_local.sh (the worktree collection folder, e.g. \$HOME/Sites/fe)," >&2
-  echo "       or run wt in the repo's main folder, or a branch's folder beside it." >&2
-  exit 2
-fi
+# Shared helpers: wt_not_configured, folder_in_use, remove_links, restore_tracked_links
+source "$(cd "$(dirname "$0")" && pwd)/wt-common.sh"
+[[ -n "${WT_WORKTREE_REPO_LOCATION:-}" ]] || wt_not_configured wt-clean
 # Without WT_REPO_SLUG (as when run in a main folder with no settings, or another repo's), the
 # repo gh says the main folder's clone is
 if [[ -z "${WT_REPO_SLUG:-}" ]]; then
@@ -138,8 +135,7 @@ if [[ -z "${WT_REPO_SLUG:-}" ]]; then
     gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null)" || WT_REPO_SLUG=""
 fi
 if [[ -z "${WT_REPO_SLUG:-}" ]]; then
-  echo "error: WT_REPO_SLUG is not set, and gh couldn't tell the repo from the main folder's clone." >&2
-  echo "       Export it in local/shell_local.sh (the GitHub repo, e.g. owner/repo)." >&2
+  echo "error: wt-clean: WT_REPO_SLUG is not set, and gh couldn't tell the repo from the main folder's clone. Export WT_REPO_SLUG as the GitHub repo, like owner/repo." >&2
   exit 2
 fi
 REPO_ROOT="$WT_WORKTREE_REPO_LOCATION"
@@ -171,18 +167,16 @@ if [[ -n "${WT_SAFE_ARTIFACTS:-}" ]]; then
 fi
 
 # --- sanity checks -----------------------------------------------------------
-command -v gh >/dev/null || { echo "gh CLI is required but not installed." >&2; exit 1; }
+command -v gh >/dev/null || { echo "wt-clean: wt clean needs gh to tell which branches were merged, and it isn't installed. Install it from https://cli.github.com." >&2; exit 1; }
 # The main worktree must be a valid git worktree (works in both layouts).
 git -C "$MAIN_WT" rev-parse --is-inside-work-tree >/dev/null 2>&1 \
-  || { echo "No git worktree found at $MAIN_WT (set WT_WORKTREE_REPO_LOCATION)." >&2; exit 1; }
-gh auth status >/dev/null 2>&1 || { echo "gh is not authenticated. Run: gh auth login" >&2; exit 1; }
+  || { echo "wt-clean: there's no git worktree at $MAIN_WT. Check WT_WORKTREE_REPO_LOCATION, or run wt in the repo's main folder." >&2; exit 1; }
+gh auth status >/dev/null 2>&1 || { echo "wt-clean: gh isn't logged in, so it can't tell which branches were merged. Run gh auth login, then try again." >&2; exit 1; }
 
 # Refresh remote refs so upstream comparisons are accurate.
 git -C "$MAIN_WT" fetch --prune "$REMOTE_NAME" --quiet || echo "warn: fetch failed, using cached refs" >&2
 
 # --- helpers -----------------------------------------------------------------
-# folder_in_use, remove_links, restore_tracked_links
-source "$(cd "$(dirname "$0")" && pwd)/wt-common.sh"
 
 # list_worktrees: Each worktree that has a branch, as "<path><TAB><branch>". Read whole lines:
 # paths can have spaces in them (C:/Users/Jane Doe/...), so they can't be split on whitespace.

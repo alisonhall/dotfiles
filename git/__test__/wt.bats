@@ -1,122 +1,10 @@
 #!/usr/bin/env bats
 # Tests for the wt commands (git/wt/), against a local "GitHub" repo and a fake gh.
 
+load wt-fixture
+
 setup() {
-	WT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)/wt"
-	export HOME="$BATS_TEST_TMPDIR/home"
-	export GIT_CONFIG_NOSYSTEM=1
-	unset GIT_CONFIG_GLOBAL
-	mkdir -p "$HOME"
-	git config --global user.name Test
-	git config --global user.email test@example.com
-	git config --global init.defaultBranch main
-
-	# The "GitHub" repo, and the folder wt manages, with its clone in main/
-	git init -q --bare "$BATS_TEST_TMPDIR/origin.git"
-	export WT_WORKTREE_REPO_LOCATION="$BATS_TEST_TMPDIR/repo"
-	export WT_REPO_SLUG=acme/shop
-	MAIN="$WT_WORKTREE_REPO_LOCATION/main"
-	git clone -q "$BATS_TEST_TMPDIR/origin.git" "$MAIN" 2>/dev/null
-	printf 'node_modules\n.env\n' > "$MAIN/.gitignore"
-	git -C "$MAIN" add .gitignore
-	git -C "$MAIN" commit -q -m init
-	git -C "$MAIN" push -q origin main
-
-	# main's dependencies, which branch folders share
-	mkdir -p "$MAIN/node_modules/pkg"
-	echo 'module.exports = 42' > "$MAIN/node_modules/pkg/index.js"
-
-	# (Printed beside a test that fails, so a wt add --pr test failing with exit 4 says why)
-	command -v jq >/dev/null 2>&1 || echo "# jq isn't installed, and the tests' gh needs it for wt add --pr"
-
-	# A gh that's logged in. Asked for every pull request of a branch (wt clean), it says each
-	# existing branch's was merged at its current commit (a branch that doesn't exist yet has
-	# none). Asked for merged ones only (wt add and wt cd), it lists those in FAKE_MERGED_PRS
-	# ("<branch>=<number> ..."), as "<number><TAB><branch>" lines like find_merged_pr's --jq
-	# makes. Like the real gh, it needs --repo outside a clone. Asked to view a pull request (wt add
-	# --pr), it answers from FAKE_PRS ("<number>:<from a fork: true|false>:<base>:<head>[:<the
-	# fork, owner/repo, when its author lets maintainers push>] ..."), put through wt-add's own
-	# --jq, and fails for any other number. Asked for its state (wt clean), any PR whose head is on the
-	# "GitHub" repo was merged at that commit, unless it's in FAKE_OPEN_PRS ("<number> ...").
-	mkdir -p "$BATS_TEST_TMPDIR/bin"
-	cat > "$BATS_TEST_TMPDIR/bin/gh" <<-'EOF'
-		#!/usr/bin/env bash
-		case "$1 $2" in
-			"auth status") exit 0 ;;
-			# The repo of the clone it's run in, like the real gh; outside a clone it can't tell
-			"repo view")
-				git rev-parse --git-dir >/dev/null 2>&1 || exit 1
-				echo acme/shop
-				;;
-			"pr view")
-				# FAKE_GH_OFFLINE: as when GitHub can't be reached
-				[ -n "${FAKE_GH_OFFLINE:-}" ] && { echo "error connecting to api.github.com" >&2; exit 1; }
-				[ "$4" = --repo ] && [ "$5" != acme/shop ] && { echo "no such pull request" >&2; exit 1; }
-				if [[ " $* " == *" number,state,headRefOid "* ]]; then
-					oid="$(git -C "$WT_WORKTREE_REPO_LOCATION/main" ls-remote origin "refs/pull/$3/head" | cut -f1)"
-					[ -n "$oid" ] || { echo "GraphQL: Could not resolve to a PullRequest with the number of $3." >&2; exit 1; }
-					state=MERGED
-					[[ " ${FAKE_OPEN_PRS:-} " == *" $3 "* ]] && state=OPEN
-					printf '%s\t%s\t%s\n' "$3" "$state" "$oid"
-					exit 0
-				fi
-				for pr in ${FAKE_PRS:-}; do
-					IFS=: read -r number fork base head pushable <<< "$pr"
-					if [ "$number" = "$3" ]; then
-						can_modify=false
-						[ -n "$pushable" ] && can_modify=true
-						pushable="${pushable:-forker/shop}"
-						# The fork as GitHub gives it: null once it's deleted ("gone")
-						owner="{\"login\":\"${pushable%%/*}\"}" name="{\"name\":\"${pushable#*/}\"}"
-						[ "$pushable" = gone ] && owner=null name=null
-						# Through wt-add's own --jq, as the real gh would: on Windows jq is a Windows
-						# program too, so Git Bash changes the expression on its way, as it would for gh
-						command -v jq >/dev/null 2>&1 || { echo "wt.bats: the tests' gh needs jq, to run wt-add's --jq as gh would" >&2; exit 1; }
-						expression=""
-						while [ $# -gt 0 ]; do [ "$1" = --jq ] && expression="$2"; shift; done
-						printf '{"isCrossRepository":%s,"baseRefName":"%s","maintainerCanModify":%s,"headRepositoryOwner":%s,"headRepository":%s,"headRefName":"%s"}' \
-							"$fork" "$base" "$can_modify" "$owner" "$name" "$head" | jq -r "$expression"
-						exit
-					fi
-				done
-				echo "GraphQL: Could not resolve to a PullRequest with the number of $3." >&2
-				exit 1
-				;;
-			"pr list")
-				repo="" state="" head=""
-				while [ $# -gt 0 ]; do
-					case "$1" in
-						--repo) repo="$2" ;;
-						--state) state="$2" ;;
-						--head) head="$2" ;;
-					esac
-					shift
-				done
-				if [ -z "$repo" ] && ! git rev-parse --git-dir >/dev/null 2>&1; then
-					echo "failed to run git: fatal: not a git repository" >&2
-					exit 1
-				fi
-				# Another repo has none of these pull requests
-				[ -n "$repo" ] && [ "$repo" != acme/shop ] && exit 0
-				# FAKE_GH_NEEDS_REPO: as for a clone with several remotes and no default set
-				if [ -z "$repo" ] && [ -n "${FAKE_GH_NEEDS_REPO:-}" ]; then
-					echo "multiple remotes detected; please run gh repo set-default" >&2
-					exit 1
-				fi
-				if [ "$state" = merged ]; then
-					for pr in ${FAKE_MERGED_PRS:-}; do
-						[ "${pr%%=*}" = "$head" ] && printf '%s\t%s\n' "${pr#*=}" "$head"
-					done
-				else
-					oid="$(git -C "$WT_WORKTREE_REPO_LOCATION/main" rev-parse --verify --quiet "refs/heads/$head")" &&
-						printf '1\tMERGED\t%s\n' "$oid"
-				fi
-				;;
-			*) exit 1 ;;
-		esac
-	EOF
-	chmod +x "$BATS_TEST_TMPDIR/bin/gh"
-	export PATH="$BATS_TEST_TMPDIR/bin:$PATH"
+	wt_fixture_setup
 }
 
 teardown() {
@@ -168,33 +56,6 @@ release_folder() {
 	touch "$HOLDER_RELEASE"
 	wait "$HOLDER" 2>/dev/null || true
 	HOLDER=""
-}
-
-is_windows() {
-	case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) return 0 ;; esac
-	return 1
-}
-
-# link_dir <target> <link>: Link to a folder the way Windows users get by default: a junction there,
-# a symlink elsewhere
-link_dir() {
-	if is_windows; then
-		# (The same way as make_link in wt-common.sh, so folder names with & and such work)
-		WT_MKLINK_ARGS="\"$(cygpath -w "$2")\" \"$(cygpath -w "$1")\"" \
-			MSYS2_ARG_CONV_EXCL="*" cmd /d /v:on /c 'mklink /J !WT_MKLINK_ARGS!' >/dev/null
-	else
-		ln -s "$1" "$2"
-	fi
-}
-
-# merged_branch <branch>: A branch folder for <branch>, pushed, with a node_modules link to main's
-merged_branch() {
-	local folder="$WT_WORKTREE_REPO_LOCATION/${1//\//_}"
-	git -C "$MAIN" worktree add -q -b "$1" "$folder"
-	git -C "$folder" commit -q --allow-empty -m "work on $1"
-	git -C "$folder" push -q -u origin "$1" 2>/dev/null
-	link_dir "$MAIN/node_modules" "$folder/node_modules"
-	[ -f "$folder/node_modules/pkg/index.js" ]
 }
 
 #   -------------------------------
@@ -361,7 +222,7 @@ merged_branch() {
 		run bash "$WT/wt.sh" rm "feature/$b" </dev/null
 		[ "$status" -eq 1 ]
 		[[ "$output" == *"feature_$b has work that deleting it would lose"* ]] || false
-		[[ "$output" == *"Not run from a terminal, so nothing was deleted. Add --yes"* ]] || false
+		[[ "$output" == *"and with no terminal to ask in, nothing was deleted. Add --yes"* ]] || false
 		[ -d "$WT_WORKTREE_REPO_LOCATION/feature_$b" ]
 	done
 	run bash "$WT/wt.sh" rm feature/a </dev/null
@@ -391,7 +252,7 @@ merged_branch() {
 	run answer_in_terminal n bash "$WT/wt.sh" rm feature/a
 	echo "$output"
 	[[ "$output" == *"Delete feature_a anyway? [y/N]"* ]] || false
-	[[ "$output" == *"Nothing was deleted."* ]] || false
+	[[ "$output" == *"has uncommitted changes, so nothing was deleted."* ]] || false
 	[ -d "$WT_WORKTREE_REPO_LOCATION/feature_a" ]
 	run answer_in_terminal y bash "$WT/wt.sh" rm feature/a
 	echo "$output"
@@ -718,21 +579,6 @@ fail_rename_back() {
 	[[ "$output" == *"feature/new"*"untracked: none"* ]] || false
 }
 
-# deleted_after_merge <branch> <number>: A branch that was pushed, merged as pull request
-# <number>, and then deleted, from GitHub and from the clone. Prints its last commit.
-# fork_pr <number>: A commit only at refs/pull/<number>/head on the "GitHub" repo, as a fork's
-# pull request's head is (its branch is in the fork). Prints the commit.
-fork_pr() {
-	local sha
-	git -C "$MAIN" switch -q -c "fork-work-$1"
-	git -C "$MAIN" commit -q --allow-empty -m "a fork's work for #$1"
-	sha="$(git -C "$MAIN" rev-parse HEAD)"
-	git -C "$MAIN" push -q origin "HEAD:refs/pull/$1/head" 2>/dev/null
-	git -C "$MAIN" switch -q main
-	git -C "$MAIN" branch -q -D "fork-work-$1"
-	echo "$sha"
-}
-
 # pr_commit <number>: A new commit on pull request <number>'s head, as its author pushing more.
 # Prints the commit.
 pr_commit() {
@@ -746,6 +592,8 @@ pr_commit() {
 	echo "$sha"
 }
 
+# deleted_after_merge <branch> <number>: A branch that was pushed, merged as pull request
+# <number>, and then deleted, from GitHub and from the clone. Prints its last commit.
 deleted_after_merge() {
 	local sha
 	git -C "$MAIN" switch -q -c "$1"
@@ -998,10 +846,10 @@ deleted_after_merge() {
 
 @test "wt add refuses an option it doesn't know, and wt cd refuses any, rather than taking it for a branch" {
 	run bash "$WT/wt.sh" add --stirct feature/a
-	[ "$status" -eq 1 ]
+	[ "$status" -eq 2 ]
 	[[ "$output" == *"wt-add: unknown option --stirct"* ]] || false
 	run bash "$WT/wt.sh" cd --strict
-	[ "$status" -eq 1 ]
+	[ "$status" -eq 2 ]
 	[[ "$output" == *"wt-cd: unknown option --strict"* ]] || false
 	[ "$(ls "$WT_WORKTREE_REPO_LOCATION")" = main ]
 }
@@ -1085,13 +933,13 @@ deleted_after_merge() {
 
 @test "wt add --pr refuses a number that isn't one, a missing one, and a branch as well" {
 	run bash "$WT/wt.sh" add --pr abc
-	[ "$status" -eq 1 ]
+	[ "$status" -eq 2 ]
 	[[ "$output" == *"--pr takes a pull request's number, not 'abc'"* ]] || false
 	run bash "$WT/wt.sh" add --pr
-	[ "$status" -eq 1 ]
-	[[ "$output" == *"Usage: wt-add"* ]] || false
+	[ "$status" -eq 2 ]
+	[[ "$output" == *"Usage: wt add"* ]] || false
 	run bash "$WT/wt.sh" add --pr 12 feature/a
-	[ "$status" -eq 1 ]
+	[ "$status" -eq 2 ]
 	[[ "$output" == *"give a branch or --pr <number>, not both"* ]] || false
 	[ "$(ls "$WT_WORKTREE_REPO_LOCATION")" = main ]
 }
@@ -1180,7 +1028,7 @@ deleted_after_merge() {
 	[ "${lines[$((${#lines[@]} - 1))]}" -ef "$WT_WORKTREE_REPO_LOCATION/pr-15" ]
 	# A number that isn't one
 	run bash "$WT/wt.sh" cd --pr x
-	[ "$status" -eq 1 ]
+	[ "$status" -eq 2 ]
 	[[ "$output" == *"--pr takes a pull request's number, not 'x'"* ]] || false
 }
 
@@ -1289,7 +1137,7 @@ deleted_after_merge() {
 	cd "$BATS_TEST_TMPDIR"
 	run bash "$WT/wt.sh" add feature/other
 	[ "$status" -eq 2 ]
-	[[ "$output" == *"or run wt add in the repo's main folder"* ]] || false
+	[[ "$output" == *"Run it in the repo's main folder"* ]] || false
 }
 
 @test "a folder named main that isn't a worktree's top doesn't count as the main folder" {
@@ -1400,11 +1248,11 @@ deleted_after_merge() {
 
 @test "the wt function doesn't ask for a branch when an option is wrong, but says so at once" {
 	run bash -c '. "$1/wt.sh" && wt add --stirct <<< feature/a' _ "$WT"
-	[ "$status" -eq 1 ]
+	[ "$status" -eq 2 ]
 	[[ "$output" != *"Branch name: "* ]] || false
 	[[ "$output" == *"wt-add: unknown option --stirct"* ]] || false
 	run bash -c '. "$1/wt.sh" && wt cd --strict <<< feature/a' _ "$WT"
-	[ "$status" -eq 1 ]
+	[ "$status" -eq 2 ]
 	[[ "$output" != *"Branch name: "* ]] || false
 	[[ "$output" == *"wt-cd: unknown option --strict"* ]] || false
 	[ "$(ls "$WT_WORKTREE_REPO_LOCATION")" = main ]
@@ -1412,8 +1260,8 @@ deleted_after_merge() {
 
 @test "wt add with no branch asks for one, and stops if none is given" {
 	run bash -c '. "$1/wt.sh" && wt add <<< ""' _ "$WT"
-	[ "$status" -eq 1 ]
-	[[ "$output" == *"wt add: no branch name given"* ]] || false
+	[ "$status" -eq 2 ]
+	[[ "$output" == *"wt add: no branch name was given"* ]] || false
 	[ "$(ls "$WT_WORKTREE_REPO_LOCATION")" = main ]
 }
 
