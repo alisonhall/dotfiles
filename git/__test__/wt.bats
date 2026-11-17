@@ -1793,3 +1793,19 @@ porcelain_run() {
 	[ "${lines[0]}" -ef "$WT_WORKTREE_REPO_LOCATION/feature_p" ]
 	[ "${lines[1]}" -ef "$MAIN" ]
 }
+
+@test "wt link, run in a worktree git made at ../feature/x (outside the layout), finds the layout" {
+	unset WT_WORKTREE_REPO_LOCATION WT_REPO_SLUG
+	git -C "$MAIN" worktree add -q -b feature/x "$BATS_TEST_TMPDIR/repo/feature/x"
+	cd "$BATS_TEST_TMPDIR/repo/feature/x"
+	run bash "$WT/wt.sh" link --no-workspaces
+	[ "$status" -eq 0 ]
+	[ "$BATS_TEST_TMPDIR/repo/feature/x/node_modules" -ef "$MAIN/node_modules" ]
+	run bash "$WT/wt.sh" config
+	[[ "$output" == *"WT_WORKTREE_REPO_LOCATION"*"$BATS_TEST_TMPDIR/repo"* ]] || false
+	# And wt rm takes it, from main
+	cd "$MAIN"
+	run bash "$WT/wt.sh" rm --yes --branch "$BATS_TEST_TMPDIR/repo/feature/x"
+	[ "$status" -eq 0 ]
+	[ ! -e "$BATS_TEST_TMPDIR/repo/feature/x" ]
+}

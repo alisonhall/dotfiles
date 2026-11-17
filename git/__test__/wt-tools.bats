@@ -117,6 +117,12 @@ link_after_checkout() {
 	as_tool "$1" 'wt link'
 	[ "$status" -eq 0 ]
 	[ "$LOCATION/feature_a/node_modules" -ef "$MAIN/node_modules" ]
+	# The dashboard's worktree folder ../{branch} puts feature/b in a folder inside "feature"
+	git -C "$MAIN" worktree add -q -b feature/b "$LOCATION/feature/b"
+	cd "$LOCATION/feature/b"
+	as_tool "$1" 'wt link'
+	[ "$status" -eq 0 ]
+	[ "$LOCATION/feature/b/node_modules" -ef "$MAIN/node_modules" ]
 }
 @test "bash: wt link, run in a worktree git made, links it to main" {
 	link_after_checkout bash

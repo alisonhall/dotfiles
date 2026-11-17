@@ -238,8 +238,22 @@ show_config() {
 	done
 }
 
+# repo_layout <folder>: For a worktree outside the layout but of a layout's repo - one git made at
+# ../feature/x for branch feature/x, say - prints that layout's folder and succeeds: the folder
+# holding the repo's main worktree (the first git lists), when that's a layout's main (in the
+# bare-repo layout, the first is .bare, beside main).
+repo_layout() {
+	local first
+	first="$(git -C "$1" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')"
+	[ -n "$first" ] || return 1
+	case "$first" in */.bare) first="$(dirname "$first")/main" ;; esac
+	[ "$(basename "$first")" = main ] && [ -d "$first" ] || return 1
+	_wt_layout_location "$first"
+}
+
 # Run in a folder of a layout (or, for wt link and rm, given one - else the one they're run in): that
-# layout, whatever the settings say. When they're another repo's (or not set), gh finds the repo from main's clone rather than
+# layout, whatever the settings say. Run in (or given) another worktree of a layout's repo, that
+# repo's layout. When they're another repo's (or not set), gh finds the repo from main's clone rather than
 # from WT_REPO_SLUG; when they're this one's, the slug is kept, as gh can't tell which repo a clone
 # with several remotes is. Then the clone's git config settings: they win over exported ones unless
 # WT_WORKTREE_REPO_LOCATION was given too and is this layout (the repo's own command passed them).
@@ -256,6 +270,7 @@ case "$sub" in
     # (A folder given that's outside any layout, like a worktree made elsewhere, is wt rm's and
     # link's to check against the layout they're run in)
     if location="$(_wt_layout_location "$layout_folder")" ||
+      location="$(repo_layout "${layout_folder:-$PWD}")" ||
       { [ -n "$layout_folder" ] && location="$(_wt_layout_location)"; }; then
       if ! [ "${WT_WORKTREE_REPO_LOCATION:-}" -ef "$location" ]; then
         own=0
