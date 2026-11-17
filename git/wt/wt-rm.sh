@@ -108,8 +108,10 @@ if is_folder_arg "$REMOTE_BRANCH_NAME" && [ -d "$REMOTE_BRANCH_NAME" ]; then
 		folder="$WT_WORKTREE_REPO_LOCATION/$LOCAL_BRANCH_NAME"
 		NAME="$LOCAL_BRANCH_NAME"
 	else
-		folder="$top"
-		NAME="$top"
+		# As it was given, made a full path (git may spell it differently, like /private/var/...
+		# for /var/... on macOS, or C:/... on Windows)
+		folder="$(abs_path "${REMOTE_BRANCH_NAME%/}" "$PWD")"
+		NAME="$folder"
 	fi
 	REMOTE_BRANCH_NAME="$NAME"
 elif [ -z "${WT_WORKTREE_REPO_LOCATION:-}" ]; then
