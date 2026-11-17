@@ -41,6 +41,14 @@ resolve_dev_branch() {
 WT_SETTINGS="WT_REPO_SLUG:repoSlug:single CURRENT_DEV_BRANCH:devBranch:single CURRENT_REMOTE_NAME:remote:single
 WT_PROTECTED_BRANCHES:protectedBranch:multi WT_SAFE_ARTIFACTS:safeArtifact:multi WT_SYMLINK_PAIRS:symlinkPair:multi"
 
+# forget_settings: Unsets every setting, for when the environment's values are another repo's
+forget_settings() {
+	local entry
+	for entry in $WT_SETTINGS; do
+		unset "${entry%%:*}"
+	done
+}
+
 # load_git_config <main folder> <own>: Exports each setting the clone's git config has. With <own>
 # 1, the environment's values are this repo's own (its command passed them, with its location),
 # so one set there wins; with 0, they may be another repo's, so git config wins. Records where each

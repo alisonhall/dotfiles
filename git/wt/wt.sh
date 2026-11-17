@@ -202,7 +202,7 @@ sub="${1:-help}"
 
 run() { exec bash "$WT_DIR/$1" "${@:2}"; }
 
-# Shared helpers: WT_SETTINGS, load_git_config
+# Shared helpers: WT_SETTINGS, forget_settings, load_git_config
 source "$WT_DIR/wt-common.sh"
 
 # show_config: wt config - each setting wt would use here, and where it came from
@@ -253,10 +253,10 @@ repo_layout() {
 
 # Run in a folder of a layout (or, for wt link and rm, given one - else the one they're run in): that
 # layout, whatever the settings say. Run in (or given) another worktree of a layout's repo, that
-# repo's layout. When they're another repo's (or not set), gh finds the repo from main's clone rather than
-# from WT_REPO_SLUG; when they're this one's, the slug is kept, as gh can't tell which repo a clone
-# with several remotes is. Then the clone's git config settings: they win over exported ones unless
-# WT_WORKTREE_REPO_LOCATION was given too and is this layout (the repo's own command passed them).
+# repo's layout. When WT_WORKTREE_REPO_LOCATION is another repo's, every exported setting is that
+# repo's, so none is used: only this clone's git config and the defaults (gh finds the repo from
+# main's clone). When it isn't set, exported settings are for every repo: git config wins over
+# them, and the slug is dropped (gh finds it). When it's this layout, they win over git config.
 layout_folder=""
 if [ "$sub" = link ] || [ "$sub" = rm ]; then
   for arg in "${@:2}"; do
@@ -272,9 +272,12 @@ case "$sub" in
     if location="$(_wt_layout_location "$layout_folder")" ||
       location="$(repo_layout "${layout_folder:-$PWD}")" ||
       { [ -n "$layout_folder" ] && location="$(_wt_layout_location)"; }; then
-      if ! [ "${WT_WORKTREE_REPO_LOCATION:-}" -ef "$location" ]; then
+      if [ -z "${WT_WORKTREE_REPO_LOCATION:-}" ]; then
         own=0
         unset WT_REPO_SLUG
+      elif ! [ "$WT_WORKTREE_REPO_LOCATION" -ef "$location" ]; then
+        own=0
+        forget_settings
       fi
       export WT_WORKTREE_REPO_LOCATION="$location"
       from_location="the layout it's run in"
@@ -434,9 +437,10 @@ every worktree, never committed). `wt setup` writes them; by hand:
                                                    .env, .cache) - multi
 
   The variables still work, e.g. from a per-repo command that sets them
-  for one `wt` call. In a layout, the clone's git config wins over exported
-  ones, unless WT_WORKTREE_REPO_LOCATION is set to that same layout (then
-  the variables are that repo's own, and win). wt config shows the result.
+  for one `wt` call, and win over git config. In a layout that
+  WT_WORKTREE_REPO_LOCATION points away from, all of them are ignored, as
+  they're another repo's. With it unset, git config wins over exported
+  ones (and WT_REPO_SLUG is ignored). wt config shows the result.
 
 Requirements:
   git   always (core of the tool)
