@@ -4,8 +4,9 @@
 #
 # Usage:
 #   wt-rm <branch>            remove the branch's folder
-#   wt-rm <folder>            remove that branch folder, written as a path (.,
-#                             ./x, ../x or a full path; a plain name is a branch)
+#   wt-rm <folder>            remove that worktree, written as a path (., ./x,
+#                             ../x or a full path; a plain name is a branch):
+#                             beside main, or anywhere else, if it's this repo's
 #   wt-rm --branch <...>      also delete the branch it holds (not a protected
 #                             one: CURRENT_DEV_BRANCH, WT_PROTECTED_BRANCHES)
 #   wt-rm --yes <...>         don't ask when the folder holds work that would be
@@ -29,7 +30,7 @@ while [ $# -gt 0 ]; do
 		--yes) YES=1 ;;
 		--branch) DELETE_BRANCH=1 ;;
 		-h | --help)
-			sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
+			sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
 			exit 0
 			;;
 		-*)
@@ -47,41 +48,97 @@ done
 # folder_in_use, remove_links, pull_ref_number, is_folder_arg
 source "$(cd "$(dirname "$0")" && pwd)/wt-common.sh"
 
-# (After the options, so -h works anywhere.) Given a folder, wt finds the layout from it - so
-# without a location here, the folder isn't in one.
-if [ -z "${WT_WORKTREE_REPO_LOCATION:-}" ]; then
-	if is_folder_arg "$REMOTE_BRANCH_NAME" && [ -d "$REMOTE_BRANCH_NAME" ]; then
-		echo "wt-rm: $REMOTE_BRANCH_NAME isn't a branch's folder beside a main folder of the same repo, so nothing was deleted." >&2
+# abs_path <path> <relative to>: The path, made absolute if it's relative
+abs_path() {
+	case "$1" in /* | [A-Za-z]:*) printf '%s' "$1" ;; *) printf '%s/%s' "$2" "$1" ;; esac
+}
+
+# worktree_paths <folder>: Each worktree git has registered for the folder's repo, one per line -
+# the first is always the main one (or, for a bare repo, the repo itself)
+worktree_paths() {
+	git -C "$1" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p'
+}
+
+# Given a folder - written as a path (is_folder_arg), which is never a branch name - it must be a
+# worktree's top folder (not one inside it, as deleting goes further than what was named), and a
+# worktree of this repo: beside main, or anywhere else git has it registered (made by hand, by an
+# editor, or by another tool's git worktree add). Its repo comes from git itself, so outside any
+# layout, with no location set, it still works.
+NAME=""   # how messages name the folder: its name beside main, else its full path
+top=""
+if is_folder_arg "$REMOTE_BRANCH_NAME" && [ -d "$REMOTE_BRANCH_NAME" ]; then
+	top="$(git -C "$REMOTE_BRANCH_NAME" rev-parse --show-toplevel 2>/dev/null)" || top=""
+	if [ -z "$top" ]; then
+		echo "wt-rm: $REMOTE_BRANCH_NAME isn't a worktree of a git repo, so nothing was deleted." >&2
 		exit 1
 	fi
-	wt_not_configured wt-rm
-fi
-CURRENT_REMOTE_NAME="${CURRENT_REMOTE_NAME:-origin}"
-
-MAIN_WT="$WT_WORKTREE_REPO_LOCATION/main"
-resolve_dev_branch
-
-# Given a folder - written as a path (is_folder_arg), which is never a branch name - that branch
-# folder: the folder itself, not one inside it, as deleting goes further than what was named.
-if is_folder_arg "$REMOTE_BRANCH_NAME" && [ -d "$REMOTE_BRANCH_NAME" ] && top="$(git -C "$REMOTE_BRANCH_NAME" rev-parse --show-toplevel 2>/dev/null)" && [ -n "$top" ]; then
 	if ! [ "$top" -ef "$REMOTE_BRANCH_NAME" ]; then
 		echo "wt-rm: $REMOTE_BRANCH_NAME is inside $(basename "$top"), not a branch's folder itself, so nothing was deleted. Name the folder itself to remove it." >&2
 		exit 1
 	fi
-	if [ "$top" -ef "$MAIN_WT" ]; then
+	first="$(worktree_paths "$top" | head -n 1)"
+	if [ -n "${WT_WORKTREE_REPO_LOCATION:-}" ]; then
+		# Run in (or set to) a layout: only that repo's worktrees
+		MAIN_WT="$WT_WORKTREE_REPO_LOCATION/main"
+		if ! same_repo "$top" "$MAIN_WT"; then
+			echo "wt-rm: $REMOTE_BRANCH_NAME is a worktree of a different repo than $MAIN_WT, so nothing was deleted." >&2
+			exit 1
+		fi
+	else
+		# The repo from the folder: anchor on its main worktree (a bare repo's own folder works too),
+		# with that clone's settings
+		MAIN_WT="$first"
+		load_git_config "$MAIN_WT" 0
+	fi
+	# Never the main worktree - the first git lists, whatever it's called - or the layout's main
+	if [ "$top" -ef "$first" ] || [ "$top" -ef "$MAIN_WT" ]; then
 		echo "wt-rm: won't delete the main folder, which holds the repo itself. Nothing was deleted." >&2
 		exit 1
 	fi
-	if ! [ "$(dirname "$top")" -ef "$WT_WORKTREE_REPO_LOCATION" ]; then
-		echo "wt-rm: $REMOTE_BRANCH_NAME isn't a branch's folder beside $MAIN_WT, so nothing was deleted." >&2
+	registered=0
+	while IFS= read -r wt_path; do
+		[ "$wt_path" -ef "$top" ] && registered=1
+	done < <(worktree_paths "$MAIN_WT")
+	if [ "$registered" = 0 ]; then
+		echo "wt-rm: $REMOTE_BRANCH_NAME isn't a worktree git has registered for this repo, so nothing was deleted." >&2
 		exit 1
 	fi
-	LOCAL_BRANCH_NAME="$(basename "$top")"
-	REMOTE_BRANCH_NAME="$LOCAL_BRANCH_NAME"
-	folder="$WT_WORKTREE_REPO_LOCATION/$LOCAL_BRANCH_NAME"
+	if [ -n "${WT_WORKTREE_REPO_LOCATION:-}" ] && [ "$(dirname "$top")" -ef "$WT_WORKTREE_REPO_LOCATION" ]; then
+		LOCAL_BRANCH_NAME="$(basename "$top")"
+		folder="$WT_WORKTREE_REPO_LOCATION/$LOCAL_BRANCH_NAME"
+		NAME="$LOCAL_BRANCH_NAME"
+	else
+		folder="$top"
+		NAME="$top"
+	fi
+	REMOTE_BRANCH_NAME="$NAME"
+elif [ -z "${WT_WORKTREE_REPO_LOCATION:-}" ]; then
+	# A branch, or a folder that's gone: there's no telling which repo it's of
+	wt_not_configured wt-rm
+elif is_folder_arg "$REMOTE_BRANCH_NAME"; then
+	# A folder that isn't there (any more): maybe one deleted by hand, whose record git still has
+	MAIN_WT="$WT_WORKTREE_REPO_LOCATION/main"
+	folder="$(abs_path "${REMOTE_BRANCH_NAME%/}" "$PWD")"
+	registered=0
+	while IFS= read -r wt_path; do
+		# (Compared by name in the same folder: git may write the path differently, like C:/...)
+		if [ "$(basename "$wt_path")" = "$(basename "$folder")" ] && [ "$(dirname "$wt_path")" -ef "$(dirname "$folder")" ]; then
+			registered=1
+		fi
+	done < <(worktree_paths "$MAIN_WT")
+	if [ "$registered" = 0 ]; then
+		echo "wt-rm: there's no worktree at $REMOTE_BRANCH_NAME, so nothing was deleted. Check the folder with wt ls." >&2
+		exit 1
+	fi
+	echo "wt-rm: $folder was already deleted, so this just removes git's record of it."
+	git -C "$MAIN_WT" worktree prune
+	echo "Pruned stale worktrees."
+	exit 0
 else
+	MAIN_WT="$WT_WORKTREE_REPO_LOCATION/main"
 	LOCAL_BRANCH_NAME="${REMOTE_BRANCH_NAME//\//_}"
 	folder="$WT_WORKTREE_REPO_LOCATION/$LOCAL_BRANCH_NAME"
+	NAME="$LOCAL_BRANCH_NAME"
 	# Only ever a branch's folder. Something git wouldn't accept as a branch name could be another
 	# folder entirely: .bare (the repo itself, in the bare-repo layout), . or .. (the collection
 	# folder, or the one it's in).
@@ -95,31 +152,27 @@ else
 		echo "wt-rm: won't delete the main folder, which holds the repo itself. Nothing was deleted." >&2
 		exit 1
 	fi
-fi
-
-if [ ! -d "$folder" ]; then
-	# Already deleted (by hand, say): just remove git's record of it, if it has one. If not, the
-	# branch name is probably mistyped.
-	registered=0
-	while IFS= read -r line; do
-		case "$line" in
-			worktree\ *)
-				wt_path="${line#worktree }"
-				if [ "$(basename "$wt_path")" = "$LOCAL_BRANCH_NAME" ] && [ "$(dirname "$wt_path")" -ef "$WT_WORKTREE_REPO_LOCATION" ]; then
-					registered=1
-				fi
-				;;
-		esac
-	done < <(git -C "$MAIN_WT" worktree list --porcelain 2>/dev/null)
-	if [ "$registered" = 0 ]; then
-		echo "wt-rm: there's no worktree for $REMOTE_BRANCH_NAME (no folder $LOCAL_BRANCH_NAME in $WT_WORKTREE_REPO_LOCATION), so nothing was deleted. Check the name with wt ls." >&2
-		exit 1
+	if [ ! -d "$folder" ]; then
+		# Already deleted (by hand, say): just remove git's record of it, if it has one. If not, the
+		# branch name is probably mistyped.
+		registered=0
+		while IFS= read -r wt_path; do
+			if [ "$(basename "$wt_path")" = "$LOCAL_BRANCH_NAME" ] && [ "$(dirname "$wt_path")" -ef "$WT_WORKTREE_REPO_LOCATION" ]; then
+				registered=1
+			fi
+		done < <(worktree_paths "$MAIN_WT")
+		if [ "$registered" = 0 ]; then
+			echo "wt-rm: there's no worktree for $REMOTE_BRANCH_NAME (no folder $LOCAL_BRANCH_NAME in $WT_WORKTREE_REPO_LOCATION), so nothing was deleted. Check the name with wt ls." >&2
+			exit 1
+		fi
+		echo "wt-rm: $LOCAL_BRANCH_NAME was already deleted, so this just removes git's record of it."
+		git -C "$MAIN_WT" worktree prune
+		echo "Pruned stale worktrees."
+		exit 0
 	fi
-	echo "wt-rm: $LOCAL_BRANCH_NAME was already deleted, so this just removes git's record of it."
-	git -C "$MAIN_WT" worktree prune
-	echo "Pruned stale worktrees."
-	exit 0
 fi
+CURRENT_REMOTE_NAME="${CURRENT_REMOTE_NAME:-origin}"
+resolve_dev_branch
 
 # The branch the folder holds (none when detached), for --branch
 held_branch="$(git -C "$folder" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
@@ -173,20 +226,20 @@ if [ -n "$unpushed" ]; then
 fi
 
 if [ -n "$work" ] && [ "$YES" != 1 ]; then
-	echo "wt-rm: $LOCAL_BRANCH_NAME has work that deleting it would lose:" >&2
+	echo "wt-rm: $NAME has work that deleting it would lose:" >&2
 	printf '%s\n' "$work" >&2
 	if [ -t 0 ]; then
-		printf 'Delete %s anyway? [y/N] ' "$LOCAL_BRANCH_NAME" >&2
+		printf 'Delete %s anyway? [y/N] ' "$NAME" >&2
 		read -r answer || answer=""
 		case "$answer" in
 			y | Y | yes | Yes) ;;
 			*)
-				echo "wt-rm: $LOCAL_BRANCH_NAME has $lost, so nothing was deleted." >&2
+				echo "wt-rm: $NAME has $lost, so nothing was deleted." >&2
 				exit 1
 				;;
 		esac
 	else
-		echo "wt-rm: $LOCAL_BRANCH_NAME has $lost, and with no terminal to ask in, nothing was deleted. Add --yes to delete it anyway." >&2
+		echo "wt-rm: $NAME has $lost, and with no terminal to ask in, nothing was deleted. Add --yes to delete it anyway." >&2
 		exit 1
 	fi
 fi
@@ -195,12 +248,12 @@ in_use=0
 folder_in_use "$folder" || in_use=$?
 case "$in_use" in
 	0)
-		echo "wt-rm: $LOCAL_BRANCH_NAME is in use by another program, like an editor or a terminal that's in it, so nothing was deleted. Close it (or cd out of the folder), then run this again." >&2
+		echo "wt-rm: $NAME is in use by another program, like an editor or a terminal that's in it, so nothing was deleted. Close it (or cd out of the folder), then run this again." >&2
 		exit 1
 		;;
 	2)
 		# Renamed and stuck; folder_in_use said where it is
-		echo "wt-rm: $LOCAL_BRANCH_NAME was renamed while checking whether it was in use and couldn't be renamed back, so nothing was deleted. Put it back as shown above." >&2
+		echo "wt-rm: $NAME was renamed while checking whether it was in use and couldn't be renamed back, so nothing was deleted. Put it back as shown above." >&2
 		exit 1
 		;;
 esac
@@ -209,7 +262,7 @@ esac
 # (-f: whether to delete was settled above, so rm doesn't ask about read-only files too.)
 remove_links "$folder"
 rm -rf "$folder"
-echo "Worktree folder $LOCAL_BRANCH_NAME removed."
+echo "Worktree folder $NAME removed."
 # Anchor the prune on the main worktree: the collection folder is not a git
 # repo in the normal-repo-at-main layout, and the user's CWD may not be a git
 # repo at all. main is a valid worktree in both layouts.

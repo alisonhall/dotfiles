@@ -376,7 +376,7 @@ release_folder() {
 	unset WT_WORKTREE_REPO_LOCATION
 	run bash "$WT/wt.sh" rm "$BATS_TEST_TMPDIR/elsewhere"
 	[ "$status" -eq 1 ]
-	[[ "$output" == *"isn't a branch's folder beside a main folder of the same repo"* ]] || false
+	[[ "$output" == *"isn't a worktree of a git repo"* ]] || false
 	[ -d "$BATS_TEST_TMPDIR/elsewhere" ]
 	run bash "$WT/wt.sh" rm -h
 	[ "$status" -eq 0 ]
@@ -393,10 +393,16 @@ release_folder() {
 @test "wt rm won't take anything git wouldn't accept as a branch name, like . or .." {
 	# In the folder that holds main, where . is that folder and .. the one holding it
 	cd "$WT_WORKTREE_REPO_LOCATION"
-	for name in . .. .git feature/.hidden; do
+	for name in .git feature/.hidden; do
 		run bash "$WT/wt.sh" rm "$name"
 		[ "$status" -ne 0 ]
 		[[ "$output" == *"isn't a branch name"* ]] || false
+	done
+	# (. and .. are written as paths, so they're folders - and neither is a worktree)
+	for name in . ..; do
+		run bash "$WT/wt.sh" rm "$name"
+		[ "$status" -ne 0 ]
+		[[ "$output" == *"isn't a worktree of a git repo"* ]] || false
 	done
 	[ -d "$MAIN/.git" ]
 }
@@ -1623,4 +1629,167 @@ develop_is_default() {
 	run bash "$WT/wt.sh" config
 	[ "$status" -eq 2 ]
 	[[ "$output" == *"WT_WORKTREE_REPO_LOCATION is not set"* ]] || false
+}
+
+#   -------------------------------
+#   WT RM AND WORKTREES OUTSIDE THE LAYOUT
+#   -------------------------------
+
+@test "wt rm removes a worktree made elsewhere, and --branch deletes its branch" {
+	mkdir -p "$BATS_TEST_TMPDIR/elsewhere"
+	git -C "$MAIN" worktree add -q -b feature/far "$BATS_TEST_TMPDIR/elsewhere/far"
+	echo change >> "$BATS_TEST_TMPDIR/elsewhere/far/.gitignore"
+	cd "$MAIN"
+	run bash "$WT/wt.sh" rm --yes --branch "$BATS_TEST_TMPDIR/elsewhere/far"
+	[ "$status" -eq 0 ]
+	[ ! -e "$BATS_TEST_TMPDIR/elsewhere/far" ]
+	# Messages name it by its full path
+	[[ "$output" == *"Worktree folder $BATS_TEST_TMPDIR/elsewhere/far removed."* ]] || false
+	[[ "$output" == *"Branch feature/far deleted."* ]] || false
+	run git -C "$MAIN" worktree list --porcelain
+	[[ "$output" != *"elsewhere/far"* ]] || false
+	# Without --yes, its work stops it, as for a folder beside main
+	git -C "$MAIN" worktree add -q -b feature/far2 "$BATS_TEST_TMPDIR/elsewhere/far2"
+	echo new > "$BATS_TEST_TMPDIR/elsewhere/far2/new-file.txt"
+	run bash "$WT/wt.sh" rm "$BATS_TEST_TMPDIR/elsewhere/far2" </dev/null
+	[ "$status" -eq 1 ]
+	[[ "${lines[$((${#lines[@]} - 1))]}" == *"$BATS_TEST_TMPDIR/elsewhere/far2 has uncommitted changes"* ]] || false
+	[ -d "$BATS_TEST_TMPDIR/elsewhere/far2" ]
+}
+
+@test "wt rm removes a worktree made elsewhere from outside any layout, with nothing set" {
+	mkdir -p "$BATS_TEST_TMPDIR/elsewhere"
+	git -C "$MAIN" worktree add -q -b feature/far "$BATS_TEST_TMPDIR/elsewhere/far"
+	git -C "$MAIN" config wt.protectedBranch feature/far
+	unset WT_WORKTREE_REPO_LOCATION WT_REPO_SLUG
+	cd "$BATS_TEST_TMPDIR"
+	run bash "$WT/wt.sh" rm --branch "$BATS_TEST_TMPDIR/elsewhere/far"
+	[ "$status" -eq 0 ]
+	[ ! -e "$BATS_TEST_TMPDIR/elsewhere/far" ]
+	# (Its clone's settings are used: the branch is protected there)
+	[[ "$output" == *"Kept branch feature/far, as it's protected."* ]] || false
+}
+
+@test "wt rm removes git's record of a worktree made elsewhere that was already deleted" {
+	mkdir -p "$BATS_TEST_TMPDIR/elsewhere"
+	git -C "$MAIN" worktree add -q -b feature/far "$BATS_TEST_TMPDIR/elsewhere/far"
+	rm -rf "$BATS_TEST_TMPDIR/elsewhere/far"
+	cd "$MAIN"
+	run bash "$WT/wt.sh" rm "$BATS_TEST_TMPDIR/elsewhere/far"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"already deleted"* ]] || false
+	run git -C "$MAIN" worktree list --porcelain
+	[[ "$output" != *"elsewhere/far"* ]] || false
+	# One git has no record of
+	run bash "$WT/wt.sh" rm "$BATS_TEST_TMPDIR/elsewhere/never"
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"there's no worktree at"* ]] || false
+}
+
+@test "wt rm still refuses main (by path, or a link to it), a folder that isn't a worktree, and another repo's" {
+	cd "$MAIN"
+	run bash "$WT/wt.sh" rm "$MAIN"
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"won't delete the main folder"* ]] || false
+	ln -s "$MAIN" "$BATS_TEST_TMPDIR/link-to-main"
+	run bash "$WT/wt.sh" rm "$BATS_TEST_TMPDIR/link-to-main"
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"won't delete the main folder"* ]] || false
+	# The main worktree, whatever it's called, outside any layout
+	unset WT_WORKTREE_REPO_LOCATION
+	cd "$BATS_TEST_TMPDIR"
+	run bash "$WT/wt.sh" rm "$MAIN"
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"won't delete the main folder"* ]] || false
+	[ -d "$MAIN/.git" ]
+	cd "$MAIN"
+	# A plain folder
+	mkdir "$BATS_TEST_TMPDIR/plain"
+	run bash "$WT/wt.sh" rm "$BATS_TEST_TMPDIR/plain"
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"isn't a worktree of a git repo"* ]] || false
+	[ -d "$BATS_TEST_TMPDIR/plain" ]
+	# Another repo's worktree, run in this repo's folder
+	git init -q "$BATS_TEST_TMPDIR/other"
+	git -C "$BATS_TEST_TMPDIR/other" commit -q --allow-empty -m init
+	git -C "$BATS_TEST_TMPDIR/other" worktree add -q -b x "$BATS_TEST_TMPDIR/other-x"
+	run bash "$WT/wt.sh" rm --yes "$BATS_TEST_TMPDIR/other-x"
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"is a worktree of a different repo than"* ]] || false
+	[ -d "$BATS_TEST_TMPDIR/other-x" ]
+}
+
+@test "wt link fixes a worktree of the repo made elsewhere, but not another repo's" {
+	mkdir -p "$BATS_TEST_TMPDIR/elsewhere"
+	git -C "$MAIN" worktree add -q -b feature/far "$BATS_TEST_TMPDIR/elsewhere/far"
+	cd "$MAIN"
+	run bash "$WT/wt.sh" link --no-workspaces "$BATS_TEST_TMPDIR/elsewhere/far"
+	[ "$status" -eq 0 ]
+	[ "$BATS_TEST_TMPDIR/elsewhere/far/node_modules" -ef "$MAIN/node_modules" ]
+	git init -q "$BATS_TEST_TMPDIR/other"
+	run bash "$WT/wt.sh" link --no-workspaces "$BATS_TEST_TMPDIR/other"
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"isn't a branch's folder beside"* ]] || false
+}
+
+#   -------------------------------
+#   --PORCELAIN
+#   -------------------------------
+
+# porcelain_run <args...>: wt with stdout and stderr apart: sets status, out, err
+porcelain_run() {
+	status=0
+	out="$(bash "$WT/wt.sh" "$@" 2>"$BATS_TEST_TMPDIR/err" </dev/null)" || status=$?
+	err="$(cat "$BATS_TEST_TMPDIR/err")"
+}
+
+@test "wt add --porcelain prints only the worktree's full path, also when it already exists" {
+	git -C "$MAIN" push -q origin main:refs/heads/feature/a 2>/dev/null
+	porcelain_run add --porcelain feature/a
+	[ "$status" -eq 0 ]
+	[ "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" -eq 1 ]
+	[ "$out" -ef "$WT_WORKTREE_REPO_LOCATION/feature_a" ]
+	case "$out" in /* | [A-Za-z]:*) ;; *) false ;; esac
+	[[ "$err" == *"Creating worktree tracking it"* ]] || false
+	# Again: it's there already
+	porcelain_run add feature/a --porcelain --strict
+	[ "$status" -eq 0 ]
+	[ "$out" -ef "$WT_WORKTREE_REPO_LOCATION/feature_a" ]
+	[[ "$err" == *"already exists"* ]] || false
+	# Exit codes are the same, with nothing on stdout
+	porcelain_run add --porcelain --strict feature/missing
+	[ "$status" -eq 3 ]
+	[ -z "$out" ]
+	porcelain_run add --porcelain --bogus x
+	[ "$status" -eq 2 ]
+	[ -z "$out" ]
+}
+
+@test "wt add --pr --porcelain and wt cd --porcelain print the folder too" {
+	command -v jq >/dev/null 2>&1 || skip "jq isn't installed, for the tests' gh"
+	fork_pr 13 >/dev/null
+	export FAKE_PRS="13:true:main:feature/x"
+	porcelain_run add --pr 13 --porcelain
+	[ "$status" -eq 0 ]
+	[ "$out" -ef "$WT_WORKTREE_REPO_LOCATION/pr-13" ]
+	git -C "$MAIN" push -q origin main:refs/heads/feature/b 2>/dev/null
+	porcelain_run cd --porcelain feature/b
+	[ "$status" -eq 0 ]
+	[ "$out" -ef "$WT_WORKTREE_REPO_LOCATION/feature_b" ]
+	porcelain_run cd feature/b --porcelain
+	[ "$status" -eq 0 ]
+	[ "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" -eq 1 ]
+	[ "$out" -ef "$WT_WORKTREE_REPO_LOCATION/feature_b" ]
+}
+
+@test "the wt function doesn't move the terminal with --porcelain, and prints the path" {
+	run bash -c '. "$1/wt.sh" && cd "$2" && wt add --porcelain feature/p 2>/dev/null && pwd' _ "$WT" "$MAIN"
+	[ "$status" -eq 0 ]
+	[ "${#lines[@]}" -eq 2 ]
+	[ "${lines[0]}" -ef "$WT_WORKTREE_REPO_LOCATION/feature_p" ]
+	[ "${lines[1]}" -ef "$MAIN" ]
+	run zsh -f -c 'source "$1/wt.sh" && cd "$2" && wt cd --porcelain feature/p 2>/dev/null && pwd' _ "$WT" "$MAIN"
+	[ "$status" -eq 0 ]
+	[ "${lines[0]}" -ef "$WT_WORKTREE_REPO_LOCATION/feature_p" ]
+	[ "${lines[1]}" -ef "$MAIN" ]
 }

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # wt-common.sh — shared helpers for the wt-*.sh scripts.
-# Sourced (not executed) by wt-add.sh, wt-cd.sh, wt-clean.sh, wt-link.sh, wt-ls.sh and wt-rm.sh.
+# Sourced (not executed) by wt.sh (when run, not when sourced), wt-add.sh, wt-cd.sh, wt-clean.sh,
+# wt-link.sh, wt-ls.sh and wt-rm.sh.
 #
 # These helpers read globals set by the calling script before they are invoked:
 #   WT_WORKTREE_REPO_LOCATION, MAIN_WT, CURRENT_REMOTE_NAME, REMOTE_BRANCH_NAME,
@@ -33,6 +34,35 @@ resolve_dev_branch() {
 	[ -n "$CURRENT_DEV_BRANCH" ] || CURRENT_DEV_BRANCH=main
 }
 
+# Per-repo settings, as "<variable>:<git config key>:<single|multi>". They're read from the clone's
+# git config (main/.git/config, or .bare/config - shared by every worktree, never committed), where
+# wt setup writes them, so plain wt works in any repo with no per-repo command. A multi key has an
+# entry per value (git config --add), joined with spaces as the scripts expect.
+WT_SETTINGS="WT_REPO_SLUG:repoSlug:single CURRENT_DEV_BRANCH:devBranch:single CURRENT_REMOTE_NAME:remote:single
+WT_PROTECTED_BRANCHES:protectedBranch:multi WT_SAFE_ARTIFACTS:safeArtifact:multi WT_SYMLINK_PAIRS:symlinkPair:multi"
+
+# load_git_config <main folder> <own>: Exports each setting the clone's git config has. With <own>
+# 1, the environment's values are this repo's own (its command passed them, with its location),
+# so one set there wins; with 0, they may be another repo's, so git config wins. Records where each
+# value came from in from_<variable> (env, git config), for wt config.
+load_git_config() {
+	local entry var key kind value
+	for entry in $WT_SETTINGS; do
+		IFS=: read -r var key kind <<< "$entry"
+		[ -n "${!var:-}" ] && printf -v "from_$var" '%s' env
+		if [ "$kind" = multi ]; then
+			value="$(git -C "$1" config --get-all "wt.$key" 2>/dev/null | tr '\n' ' ')"
+			value="${value% }"
+		else
+			value="$(git -C "$1" config --get "wt.$key" 2>/dev/null)"
+		fi
+		[ -n "$value" ] || continue
+		[ "$2" = 1 ] && [ -n "${!var:-}" ] && continue
+		export "$var=$value"
+		printf -v "from_$var" '%s' "git config wt.$key"
+	done
+}
+
 # pull_ref_number <branch>: If <branch> follows a pull request's head, refs/pull/<n>/head (as
 # wt add --pr and gh pr checkout set up a fork's PR), prints <n> and succeeds. Such a branch isn't
 # on the remote under its own name, so it's fetched, compared and looked up by its PR instead.
@@ -44,6 +74,20 @@ pull_ref_number() {
 	number="${number%/head}"
 	case "$number" in '' | *[!0-9]*) return 1 ;; esac
 	printf '%s' "$number"
+}
+
+# common_dir <folder>: The folder's repo's git folder (shared by all its worktrees), as a full path
+# (git gives it relative to the folder, unless absolute - C:/... from Windows' git too)
+common_dir() {
+	local dir
+	dir="$(git -C "$1" rev-parse --git-common-dir 2>/dev/null)" || return 1
+	case "$dir" in /* | [A-Za-z]:*) printf '%s' "$dir" ;; *) printf '%s/%s' "$1" "$dir" ;; esac
+}
+
+# same_repo <folder> <folder>: Whether both are worktrees of the same repo
+same_repo() {
+	local a b
+	a="$(common_dir "$1")" && b="$(common_dir "$2")" && [ "$a" -ef "$b" ]
 }
 
 # is_folder_arg <arg>: Whether a command's argument is a folder rather than a branch: written as a
@@ -61,6 +105,30 @@ is_folder_arg() {
 tell_folder() {
 	[ -n "${WT_CD_FILE:-}" ] || return 0
 	printf '%s\n' "$1" > "$WT_CD_FILE"
+}
+
+# run_porcelain <script> <args...>: For wt add/cd --porcelain: runs the script again with the args
+# (not --porcelain), all its output on stderr, and prints only the folder it used (as tell_folder
+# says) on stdout - one line, its full path - then exits with its exit code. (The second run keeps
+# anything it starts, like git's background maintenance after a fetch, from holding stdout open:
+# a tool reads it until every program holding it has closed it.)
+run_porcelain() {
+	local script="$1" file code=0 folder
+	shift
+	file="$(mktemp "${TMPDIR:-/tmp}/wt-porcelain.XXXXXX")" || exit 1
+	trap 'rm -f "$file"' EXIT
+	trap 'exit 130' INT
+	WT_CD_FILE="$file" bash "$script" "$@" >&2 || code=$?
+	folder="$(cat "$file" 2>/dev/null)"
+	[ "$code" -eq 0 ] || exit "$code"
+	if [ -z "$folder" ]; then
+		echo "error: $(basename "$script" .sh): it finished but didn't say which folder it used." >&2
+		exit 1
+	fi
+	# (The wt function asks for it too, though with --porcelain it doesn't move the terminal)
+	[ -n "${WT_CD_FILE:-}" ] && printf '%s\n' "$folder" > "$WT_CD_FILE"
+	printf '%s\n' "$folder"
+	exit 0
 }
 
 # Echo the number of a merged PR whose head was $REMOTE_BRANCH_NAME, or nothing

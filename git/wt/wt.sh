@@ -92,7 +92,7 @@ if [ "$_wt_sourced" = "1" ]; then
         # the command line the shell would act on characters like & or ; before wt saw them
         # An option wt doesn't know is left to the script to refuse, before asking for a branch
         # that would go unused. `wt add --pr <number>` (and cd) needs no branch: the script finds it.
-        local arg branch="" unknown="" pr="" wants_number=""
+        local arg branch="" unknown="" pr="" wants_number="" porcelain=""
         for arg in "$@"; do
           if [ -n "$wants_number" ]; then
             wants_number=""
@@ -102,6 +102,7 @@ if [ "$_wt_sourced" = "1" ]; then
             -*)
               case "$sub $arg" in
                 "add --strict") ;;
+                "add --porcelain" | "cd --porcelain") porcelain=1 ;;
                 "add --pr" | "cd --pr") pr=1; wants_number=1 ;;
                 *) unknown=1 ;;
               esac
@@ -134,6 +135,8 @@ if [ "$_wt_sourced" = "1" ]; then
         # On failure, the script's own exit code (like --strict's 3 and 4), for a tool that runs wt
         # in an interactive shell and so gets this function
         [ "$code" -eq 0 ] || return "$code"
+        # --porcelain: the caller wants the folder's path (printed by the script), not a moved shell
+        [ -n "$porcelain" ] && return 0
         if [ -n "$folder" ]; then
           cd "$folder"
         elif [ -n "$branch" ]; then
@@ -199,34 +202,8 @@ sub="${1:-help}"
 
 run() { exec bash "$WT_DIR/$1" "${@:2}"; }
 
-# Per-repo settings, as "<variable>:<git config key>:<single|multi>". They're read from the clone's
-# git config (main/.git/config, or .bare/config - shared by every worktree, never committed), where
-# wt setup writes them, so plain wt works in any repo with no per-repo command. A multi key has an
-# entry per value (git config --add), joined with spaces as the scripts expect.
-WT_SETTINGS="WT_REPO_SLUG:repoSlug:single CURRENT_DEV_BRANCH:devBranch:single CURRENT_REMOTE_NAME:remote:single
-WT_PROTECTED_BRANCHES:protectedBranch:multi WT_SAFE_ARTIFACTS:safeArtifact:multi WT_SYMLINK_PAIRS:symlinkPair:multi"
-
-# load_git_config <main folder> <own>: Exports each setting the clone's git config has. With <own>
-# 1, the environment's values are this repo's own (its command passed them, with its location),
-# so one set there wins; with 0, they may be another repo's, so git config wins. Records where each
-# value came from in from_<variable> (env, git config), for wt config.
-load_git_config() {
-	local entry var key kind value
-	for entry in $WT_SETTINGS; do
-		IFS=: read -r var key kind <<< "$entry"
-		[ -n "${!var:-}" ] && printf -v "from_$var" '%s' env
-		if [ "$kind" = multi ]; then
-			value="$(git -C "$1" config --get-all "wt.$key" 2>/dev/null | tr '\n' ' ')"
-			value="${value% }"
-		else
-			value="$(git -C "$1" config --get "wt.$key" 2>/dev/null)"
-		fi
-		[ -n "$value" ] || continue
-		[ "$2" = 1 ] && [ -n "${!var:-}" ] && continue
-		export "$var=$value"
-		printf -v "from_$var" '%s' "git config wt.$key"
-	done
-}
+# Shared helpers: WT_SETTINGS, load_git_config
+source "$WT_DIR/wt-common.sh"
 
 # show_config: wt config - each setting wt would use here, and where it came from
 show_config() {
@@ -261,8 +238,8 @@ show_config() {
 	done
 }
 
-# Run in a folder of a layout (or, for wt link and rm, given one): that layout, whatever the settings
-# say. When they're another repo's (or not set), gh finds the repo from main's clone rather than
+# Run in a folder of a layout (or, for wt link and rm, given one - else the one they're run in): that
+# layout, whatever the settings say. When they're another repo's (or not set), gh finds the repo from main's clone rather than
 # from WT_REPO_SLUG; when they're this one's, the slug is kept, as gh can't tell which repo a clone
 # with several remotes is. Then the clone's git config settings: they win over exported ones unless
 # WT_WORKTREE_REPO_LOCATION was given too and is this layout (the repo's own command passed them).
@@ -276,7 +253,10 @@ fi
 case "$sub" in
   add | cd | rm | ls | link | clean | config)
     own=1
-    if location="$(_wt_layout_location "$layout_folder")"; then
+    # (A folder given that's outside any layout, like a worktree made elsewhere, is wt rm's and
+    # link's to check against the layout they're run in)
+    if location="$(_wt_layout_location "$layout_folder")" ||
+      { [ -n "$layout_folder" ] && location="$(_wt_layout_location)"; }; then
       if ! [ "${WT_WORKTREE_REPO_LOCATION:-}" -ef "$location" ]; then
         own=0
         unset WT_REPO_SLUG
@@ -313,7 +293,8 @@ Usage:
   wt <command> [args...]
 
 Commands:
-  add [--strict] <branch> Create a new worktree from a remote branch name,
+  add [--strict] [--porcelain] <branch>
+                          Create a new worktree from a remote branch name,
                           then cd into it. Recovers squash-merged branches via
                           their PR head when the remote branch is gone.
                             --strict   fail, making nothing, when the branch
@@ -335,6 +316,11 @@ Commands:
                           (from add --pr) fetches its pull request's head.
   cd --pr <number>        The same for a pull request: its folder, made by
                           add --pr if it isn't there yet.
+                          --porcelain (add and cd, with --strict and --pr
+                          too): for a tool - print only the worktree's full
+                          path on stdout (also when it already existed),
+                          everything else on stderr, and don't move the
+                          terminal. Exit codes are the same.
                           For add and cd, leave out <branch> to be asked for
                           it: paste a name with characters like & ; ( ) there,
                           or put it in single quotes on the command line.
@@ -342,7 +328,9 @@ Commands:
                           split at an & runs wt in the background, and wt
                           stops and says so, rather than using half a name.)
   rm <branch>|<folder>    Remove a worktree folder (a branch's, or one named
-                          like .) and prune stale worktree registrations.
+                          like . - beside main, or any other worktree of the
+                          repo, wherever it is) and prune stale worktree
+                          registrations.
                           Asks first if it has work that would be lost
                           (uncommitted changes, new files, commits not on
                           the remote); without a terminal, stops instead.
