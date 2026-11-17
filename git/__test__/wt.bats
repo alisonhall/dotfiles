@@ -1611,10 +1611,32 @@ develop_is_default() {
 	[ "$status" -eq 0 ]
 	[ -L "$BATS_TEST_TMPDIR/repo/feature_b/.other" ]
 	[ ! -e "$BATS_TEST_TMPDIR/repo/feature_b/.env" ]
-	# A setting git config doesn't have is still taken from the variable
+	# Another repo's settings are ignored even where git config has nothing
 	git -C "$MAIN" config --unset-all wt.symlinkPair
 	WT_WORKTREE_REPO_LOCATION="$BATS_TEST_TMPDIR/other-repo" WT_SYMLINK_PAIRS=.other run bash "$WT/wt.sh" add feature/c
-	[ -L "$BATS_TEST_TMPDIR/repo/feature_c/.other" ]
+	[ "$status" -eq 0 ]
+	[ ! -e "$BATS_TEST_TMPDIR/repo/feature_c/.other" ]
+	# With no location, a variable git config doesn't have is still used
+	unset WT_WORKTREE_REPO_LOCATION
+	WT_SYMLINK_PAIRS=.other run bash "$WT/wt.sh" add feature/d
+	[ "$status" -eq 0 ]
+	[ -L "$BATS_TEST_TMPDIR/repo/feature_d/.other" ]
+}
+
+@test "another repo's dev branch, remote and protected branches don't apply in this layout" {
+	cd "$MAIN"
+	export WT_WORKTREE_REPO_LOCATION="$BATS_TEST_TMPDIR/other-repo"
+	export CURRENT_DEV_BRANCH=develop CURRENT_REMOTE_NAME=upstream WT_PROTECTED_BRANCHES=release
+	run bash "$WT/wt.sh" config
+	[ "$status" -eq 0 ]
+	[[ "$output" != *develop* ]] || false
+	[[ "$output" != *upstream* ]] || false
+	[[ "$output" != *release* ]] || false
+	# A new branch starts from this repo's main, not the other repo's develop
+	run bash "$WT/wt.sh" add feature/new
+	[ "$status" -eq 0 ]
+	[[ "$output" != *develop* ]] || false
+	[ "$(git -C "$BATS_TEST_TMPDIR/repo/feature_new" rev-parse HEAD)" = "$(git -C "$MAIN" rev-parse main)" ]
 }
 
 @test "wt config outside a layout, with nothing set, says so" {
