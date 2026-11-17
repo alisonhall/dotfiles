@@ -202,7 +202,7 @@ sub="${1:-help}"
 
 run() { exec bash "$WT_DIR/$1" "${@:2}"; }
 
-# Shared helpers: WT_SETTINGS, forget_settings, load_git_config
+# Shared helpers: WT_SETTINGS, use_repo_settings, load_git_config
 source "$WT_DIR/wt-common.sh"
 
 # show_config: wt config - each setting wt would use here, and where it came from
@@ -253,10 +253,8 @@ repo_layout() {
 
 # Run in a folder of a layout (or, for wt link and rm, given one - else the one they're run in): that
 # layout, whatever the settings say. Run in (or given) another worktree of a layout's repo, that
-# repo's layout. When WT_WORKTREE_REPO_LOCATION is another repo's, every exported setting is that
-# repo's, so none is used: only this clone's git config and the defaults (gh finds the repo from
-# main's clone). When it isn't set, exported settings are for every repo: git config wins over
-# them, and the slug is dropped (gh finds it). When it's this layout, they win over git config.
+# repo's layout. Its settings are the ones use_repo_settings (wt-common.sh) picks. Elsewhere, the
+# layout WT_WORKTREE_REPO_LOCATION names, its exported settings first.
 layout_folder=""
 if [ "$sub" = link ] || [ "$sub" = rm ]; then
   for arg in "${@:2}"; do
@@ -266,23 +264,17 @@ if [ "$sub" = link ] || [ "$sub" = rm ]; then
 fi
 case "$sub" in
   add | cd | rm | ls | link | clean | config)
-    own=1
     # (A folder given that's outside any layout, like a worktree made elsewhere, is wt rm's and
     # link's to check against the layout they're run in)
     if location="$(_wt_layout_location "$layout_folder")" ||
       location="$(repo_layout "${layout_folder:-$PWD}")" ||
       { [ -n "$layout_folder" ] && location="$(_wt_layout_location)"; }; then
-      if [ -z "${WT_WORKTREE_REPO_LOCATION:-}" ]; then
-        own=0
-        unset WT_REPO_SLUG
-      elif ! [ "$WT_WORKTREE_REPO_LOCATION" -ef "$location" ]; then
-        own=0
-        forget_settings
-      fi
+      use_repo_settings "$location/main" "$location"
       export WT_WORKTREE_REPO_LOCATION="$location"
       from_location="the layout it's run in"
+    elif [ -n "${WT_WORKTREE_REPO_LOCATION:-}" ]; then
+      load_git_config "$WT_WORKTREE_REPO_LOCATION/main" 1
     fi
-    [ -n "${WT_WORKTREE_REPO_LOCATION:-}" ] && load_git_config "$WT_WORKTREE_REPO_LOCATION/main" "$own"
     ;;
 esac
 

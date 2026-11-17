@@ -1629,6 +1629,17 @@ develop_is_default() {
 	[ -L "$BATS_TEST_TMPDIR/repo/feature_d/.other" ]
 }
 
+@test "a WT_WORKTREE_REPO_LOCATION that doesn't exist is warned about on stderr, but another repo's isn't" {
+	cd "$MAIN"
+	WT_WORKTREE_REPO_LOCATION="$BATS_TEST_TMPDIR/typo" bash "$WT/wt.sh" config >"$BATS_TEST_TMPDIR/out" 2>"$BATS_TEST_TMPDIR/err"
+	grep -q "WT_WORKTREE_REPO_LOCATION is $BATS_TEST_TMPDIR/typo, which doesn't exist" "$BATS_TEST_TMPDIR/err"
+	run grep -q warning "$BATS_TEST_TMPDIR/out"
+	[ "$status" -eq 1 ]
+	mkdir "$BATS_TEST_TMPDIR/other-repo"
+	WT_WORKTREE_REPO_LOCATION="$BATS_TEST_TMPDIR/other-repo" bash "$WT/wt.sh" config >/dev/null 2>"$BATS_TEST_TMPDIR/err"
+	[ ! -s "$BATS_TEST_TMPDIR/err" ]
+}
+
 @test "another repo's dev branch, remote and protected branches don't apply in this layout" {
 	cd "$MAIN"
 	export WT_WORKTREE_REPO_LOCATION="$BATS_TEST_TMPDIR/other-repo"

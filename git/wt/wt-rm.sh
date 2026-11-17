@@ -88,7 +88,7 @@ if is_folder_arg "$REMOTE_BRANCH_NAME" && [ -d "$REMOTE_BRANCH_NAME" ]; then
 		# The repo from the folder: anchor on its main worktree (a bare repo's own folder works too),
 		# with that clone's settings
 		MAIN_WT="$first"
-		load_git_config "$MAIN_WT" 0
+		use_repo_settings "$MAIN_WT"
 	fi
 	# Never the main worktree - the first git lists, whatever it's called - or the layout's main
 	if [ "$top" -ef "$first" ] || [ "$top" -ef "$MAIN_WT" ]; then

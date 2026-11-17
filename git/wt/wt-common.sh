@@ -71,6 +71,29 @@ load_git_config() {
 	done
 }
 
+# use_repo_settings <main folder> [<layout>]: Picks the settings for the layout <main folder> is
+# in (<layout> its folder), from where WT_WORKTREE_REPO_LOCATION points:
+# - At <layout>: the variables are this repo's own (its command passed them), and win over git config.
+# - At another repo: every variable is that repo's, so none is used - only this clone's git
+#   config and the defaults (gh finds the repo from main's clone). A folder that doesn't exist
+#   counts as another repo, with a warning, as it's most likely a typo.
+# - Nowhere: the variables are for every repo, so git config wins over them, and WT_REPO_SLUG is
+#   dropped (gh finds the repo from main's clone).
+use_repo_settings() {
+	local own=0
+	if [ -z "${WT_WORKTREE_REPO_LOCATION:-}" ]; then
+		unset WT_REPO_SLUG
+	elif [ -n "${2:-}" ] && [ "$WT_WORKTREE_REPO_LOCATION" -ef "$2" ]; then
+		own=1
+	else
+		if ! [ -d "$WT_WORKTREE_REPO_LOCATION" ]; then
+			echo "warning: WT_WORKTREE_REPO_LOCATION is $WT_WORKTREE_REPO_LOCATION, which doesn't exist, so its settings were ignored and this repo's git config was used. Check the path, or run wt config to see the settings." >&2
+		fi
+		forget_settings
+	fi
+	load_git_config "$1" "$own"
+}
+
 # pull_ref_number <branch>: If <branch> follows a pull request's head, refs/pull/<n>/head (as
 # wt add --pr and gh pr checkout set up a fork's PR), prints <n> and succeeds. Such a branch isn't
 # on the remote under its own name, so it's fetched, compared and looked up by its PR instead.
