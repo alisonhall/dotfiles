@@ -136,7 +136,7 @@ if [[ -z "${WT_REPO_SLUG:-}" ]]; then
     gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null)" || WT_REPO_SLUG=""
 fi
 if [[ -z "${WT_REPO_SLUG:-}" ]]; then
-  echo "error: wt-clean: WT_REPO_SLUG is not set, and gh couldn't tell the repo from the main folder's clone. Export WT_REPO_SLUG as the GitHub repo, like owner/repo." >&2
+  echo "error: wt-clean: WT_REPO_SLUG is not set, and gh couldn't tell the repo from the main folder's clone. Set it in the clone with git config wt.repoSlug owner/repo." >&2
   exit 2
 fi
 REPO_ROOT="$WT_WORKTREE_REPO_LOCATION"
