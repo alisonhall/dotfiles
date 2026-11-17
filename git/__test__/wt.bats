@@ -1828,7 +1828,9 @@ porcelain_run() {
 	[ "$status" -eq 0 ]
 	[ "$BATS_TEST_TMPDIR/repo/feature/x/node_modules" -ef "$MAIN/node_modules" ]
 	run bash "$WT/wt.sh" config
-	[[ "$output" == *"WT_WORKTREE_REPO_LOCATION"*"$BATS_TEST_TMPDIR/repo"* ]] || false
+	# (Compared as folders: Windows' git spells the path as C:/...)
+	location="$(printf '%s\n' "$output" | sed -n 's/^WT_WORKTREE_REPO_LOCATION  *\(.*\)  (.*$/\1/p')"
+	[ -n "$location" ] && [ "$location" -ef "$BATS_TEST_TMPDIR/repo" ]
 	# And wt rm takes it, from main
 	cd "$MAIN"
 	run bash "$WT/wt.sh" rm --yes --branch "$BATS_TEST_TMPDIR/repo/feature/x"
