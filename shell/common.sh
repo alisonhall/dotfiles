@@ -162,8 +162,11 @@ print-workspace-variables () {
 
 # Welcome message, shown by bashrc.sh / zshrc.sh after local/shell_local.sh is loaded.
 # Turn it off with DOTFILES_WELCOME=false in local/shell_local.sh.
+# Only in a terminal: a tool that runs commands through bash -ic (to have the aliases and
+# functions) reads what they print, and would get this too.
 dotfiles_welcome () {
 	case $- in *i*) ;; *) return 0 ;; esac
+	[ -t 1 ] || return 0
 	[ "${DOTFILES_WELCOME:-true}" = true ] || return 0
 	printf '\n*********************************\nHello %s!\n' "$NAME"
 	[ -n "${EMAIL:-}" ] && printf '\n%s\n' "$EMAIL"

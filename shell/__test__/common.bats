@@ -149,3 +149,41 @@ with_path_front() {
 	[ "$status" -eq 0 ]
 	[ "$output" = "open-local: function" ] || false
 }
+
+#   -------------------------------
+#   dotfiles_welcome
+#   -------------------------------
+
+# welcome_in_terminal: The welcome message as an interactive bash shows it in a terminal
+welcome_in_terminal() {
+	python3 -c '
+import os, pty, sys
+pid, terminal = pty.fork()
+if pid == 0:
+    os.execvp(sys.argv[1], sys.argv[1:])
+out = b""
+while True:
+    try:
+        data = os.read(terminal, 1024)
+    except OSError:
+        break
+    if not data:
+        break
+    out += data
+sys.stdout.write(out.decode(errors="replace"))
+os.waitpid(pid, 0)
+' bash --norc -ic "$1"$'\n''dotfiles_welcome'
+}
+
+@test "dotfiles_welcome: shown in a terminal, but not to a tool reading an interactive shell's output" {
+	definition="$(piece '^dotfiles_welcome () {' '^}')"
+	export NAME=Tester
+	run bash --norc -ic "$definition"$'\n''dotfiles_welcome' </dev/null
+	[ "$status" -eq 0 ]
+	[[ "$output" != *"Hello Tester"* ]] || false
+	is_windows() { case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) return 0 ;; *) return 1 ;; esac; }
+	is_windows && skip "Windows has no terminals for a test to run a shell in"
+	command -v python3 >/dev/null 2>&1 || skip "python3 isn't installed, to give it a terminal"
+	run welcome_in_terminal "$definition"
+	[[ "$output" == *"Hello Tester"* ]] || false
+}
