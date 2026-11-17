@@ -26,14 +26,17 @@ setup() {
 	mkdir -p "$MAIN/node_modules/pkg"
 	echo 'module.exports = 42' > "$MAIN/node_modules/pkg/index.js"
 
+	# (Printed beside a test that fails, so a wt add --pr test failing with exit 4 says why)
+	command -v jq >/dev/null 2>&1 || echo "# jq isn't installed, and the tests' gh needs it for wt add --pr"
+
 	# A gh that's logged in. Asked for every pull request of a branch (wt clean), it says each
 	# existing branch's was merged at its current commit (a branch that doesn't exist yet has
 	# none). Asked for merged ones only (wt add and wt cd), it lists those in FAKE_MERGED_PRS
 	# ("<branch>=<number> ..."), as "<number><TAB><branch>" lines like find_merged_pr's --jq
 	# makes. Like the real gh, it needs --repo outside a clone. Asked to view a pull request (wt add
 	# --pr), it answers from FAKE_PRS ("<number>:<from a fork: true|false>:<base>:<head>[:<the
-	# fork, owner/repo, when its author lets maintainers push>] ..."), as wt-add's --jq makes them,
-	# and fails for any other number. Asked for its state (wt clean), any PR whose head is on the
+	# fork, owner/repo, when its author lets maintainers push>] ..."), put through wt-add's own
+	# --jq, and fails for any other number. Asked for its state (wt clean), any PR whose head is on the
 	# "GitHub" repo was merged at that commit, unless it's in FAKE_OPEN_PRS ("<number> ...").
 	mkdir -p "$BATS_TEST_TMPDIR/bin"
 	cat > "$BATS_TEST_TMPDIR/bin/gh" <<-'EOF'
@@ -62,8 +65,18 @@ setup() {
 					if [ "$number" = "$3" ]; then
 						can_modify=false
 						[ -n "$pushable" ] && can_modify=true
-						printf '%s\t%s\t%s\t%s\t%s\n' "$fork" "$base" "$can_modify" "${pushable:-forker/shop}" "$head"
-						exit 0
+						pushable="${pushable:-forker/shop}"
+						# The fork as GitHub gives it: null once it's deleted ("gone")
+						owner="{\"login\":\"${pushable%%/*}\"}" name="{\"name\":\"${pushable#*/}\"}"
+						[ "$pushable" = gone ] && owner=null name=null
+						# Through wt-add's own --jq, as the real gh would: on Windows jq is a Windows
+						# program too, so Git Bash changes the expression on its way, as it would for gh
+						command -v jq >/dev/null 2>&1 || { echo "wt.bats: the tests' gh needs jq, to run wt-add's --jq as gh would" >&2; exit 1; }
+						expression=""
+						while [ $# -gt 0 ]; do [ "$1" = --jq ] && expression="$2"; shift; done
+						printf '{"isCrossRepository":%s,"baseRefName":"%s","maintainerCanModify":%s,"headRepositoryOwner":%s,"headRepository":%s,"headRefName":"%s"}' \
+							"$fork" "$base" "$can_modify" "$owner" "$name" "$head" | jq -r "$expression"
+						exit
 					fi
 				done
 				echo "GraphQL: Could not resolve to a PullRequest with the number of $3." >&2
@@ -1108,6 +1121,15 @@ deleted_after_merge() {
 	run bash "$WT/wt.sh" add --pr 15
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"git push git@github.com:forker/shop.git HEAD:refs/heads/feature/c"* ]] || false
+}
+
+@test "wt add --pr still checks out a fork's pull request once the fork is deleted, with no way to push" {
+	fork_pr 13 >/dev/null
+	export FAKE_PRS="13:true:main:feature/a:gone"
+	run bash "$WT/wt.sh" add --pr 13
+	[ "$status" -eq 0 ]
+	[ "$(git -C "$WT_WORKTREE_REPO_LOCATION/pr-13" config branch.pr-13.merge)" = refs/pull/13/head ]
+	[[ "$output" != *"git push"* ]] || false
 }
 
 @test "wt add --pr leaves no temporary files behind" {

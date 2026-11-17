@@ -153,7 +153,7 @@ fork_url() {
 # fork as a remote, with a push mapping per PR, as pr-<number> isn't the fork's branch name.)
 push_hint() {
 	local url
-	[ "${pr_can_modify:-}" = true ] && [ -n "${pr_head_repo:-}" ] && [ "$pr_head_repo" != / ] || return 0
+	[ "${pr_can_modify:-}" = true ] && [ -n "${pr_head_repo:-}" ] || return 0
 	url="$(fork_url "$pr_head_repo")" || return 0
 	echo "PR #$PR_NUMBER's author lets maintainers push to it. To add your commits to the PR:"
 	echo "  git push $url HEAD:refs/heads/$pr_head"
@@ -168,11 +168,15 @@ if [ -n "$PR_NUMBER" ]; then
 	# Removed however this ends, Ctrl-C too
 	trap 'rm -f "$gh_error"' EXIT
 	trap 'exit 130' INT
+	# No / in --jq: Git Bash takes an argument with one for a path when starting a Windows program
+	# like gh, and turns its \ into /, so the fork's owner and name come apart and are joined below.
+	# Split at : (in no branch, owner or repo name), not tabs, which read would run together when
+	# the fork's gone and both are empty.
 	pr_info="$(cd "$MAIN_WT" && {
 		if [ -n "${WT_REPO_SLUG:-}" ]; then set -- --repo "$WT_REPO_SLUG"; else set --; fi
 		gh pr view "$PR_NUMBER" "$@" \
 			--json isCrossRepository,baseRefName,maintainerCanModify,headRepositoryOwner,headRepository,headRefName \
-			--jq '"\(.isCrossRepository)\t\(.baseRefName)\t\(.maintainerCanModify)\t\(.headRepositoryOwner.login // "")/\(.headRepository.name // "")\t\(.headRefName)"' \
+			--jq '"\(.isCrossRepository):\(.baseRefName):\(.maintainerCanModify):\(.headRepositoryOwner.login // ""):\(.headRepository.name // ""):\(.headRefName)"' \
 			2>"$gh_error"
 	})" || pr_info=""
 	cat "$gh_error" >&2
@@ -185,7 +189,9 @@ if [ -n "$PR_NUMBER" ]; then
 		exit 4
 	fi
 	rm -f "$gh_error"
-	IFS=$'\t' read -r pr_fork pr_base pr_can_modify pr_head_repo pr_head <<< "$pr_info"
+	IFS=: read -r pr_fork pr_base pr_can_modify pr_head_owner pr_head_name pr_head <<< "$pr_info"
+	pr_head_repo=""
+	[ -n "$pr_head_owner" ] && [ -n "$pr_head_name" ] && pr_head_repo="$pr_head_owner/$pr_head_name"
 	if [ "$pr_fork" = true ] || [ -z "$pr_head" ] || [ "$pr_head" = "$pr_base" ]; then
 		add_pull_ref
 	fi
