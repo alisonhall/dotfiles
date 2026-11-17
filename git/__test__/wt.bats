@@ -369,34 +369,19 @@ merged_branch() {
 }
 
 @test "wt rm in a terminal asks before losing work, and deletes it only on yes" {
-	command -v script >/dev/null 2>&1 || skip "script isn't installed, to give it a terminal"
-	is_windows && skip "Git Bash's script can't give it a terminal"
+	is_windows && skip "Windows has no terminals for a test to run a command in"
+	command -v python3 >/dev/null 2>&1 || skip "python3 isn't installed, to give it a terminal"
 	merged_branch feature/a
 	echo new > "$WT_WORKTREE_REPO_LOCATION/feature_a/new-file.txt"
-	# script gives it a terminal (macOS and Linux spell it differently)
-	in_terminal() {
-		if script -q /dev/null true 2>/dev/null; then script -q /dev/null "$@"; else script -qec "$(printf '%q ' "$@")" /dev/null; fi
-	}
-	# answer_in_terminal <answer> <command...>: The command in a terminal, typing <answer>. The
-	# typing is kept open until the command ends: macOS's script ends the terminal, cutting the
-	# command off, as soon as what it's typing runs out.
-	answer_in_terminal() {
-		local fifo="$BATS_TEST_TMPDIR/terminal-input" pid code=0
-		rm -f "$fifo"
-		mkfifo "$fifo"
-		in_terminal "${@:2}" <"$fifo" &
-		pid=$!
-		exec 4>"$fifo"
-		printf '%s\n' "$1" >&4
-		wait "$pid" || code=$?
-		exec 4>&-
-		return "$code"
-	}
+	# The command in a terminal, typing the answer once it asks, as a person would
+	answer_in_terminal() { python3 "$BATS_TEST_DIRNAME/answer-in-terminal.py" "$@"; }
 	run answer_in_terminal n bash "$WT/wt.sh" rm feature/a
+	echo "$output"
 	[[ "$output" == *"Delete feature_a anyway? [y/N]"* ]] || false
 	[[ "$output" == *"Nothing was deleted."* ]] || false
 	[ -d "$WT_WORKTREE_REPO_LOCATION/feature_a" ]
 	run answer_in_terminal y bash "$WT/wt.sh" rm feature/a
+	echo "$output"
 	[[ "$output" == *"Worktree folder feature_a removed."* ]] || false
 	[ ! -e "$WT_WORKTREE_REPO_LOCATION/feature_a" ]
 }
