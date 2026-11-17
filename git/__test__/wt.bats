@@ -1691,10 +1691,13 @@ develop_is_default() {
 	run bash "$WT/wt.sh" rm "$MAIN"
 	[ "$status" -eq 1 ]
 	[[ "$output" == *"won't delete the main folder"* ]] || false
-	ln -s "$MAIN" "$BATS_TEST_TMPDIR/link-to-main"
-	run bash "$WT/wt.sh" rm "$BATS_TEST_TMPDIR/link-to-main"
-	[ "$status" -eq 1 ]
-	[[ "$output" == *"won't delete the main folder"* ]] || false
+	# Git Bash's ln -s copies, so there's no link to follow on Windows
+	if ! is_windows; then
+		ln -s "$MAIN" "$BATS_TEST_TMPDIR/link-to-main"
+		run bash "$WT/wt.sh" rm "$BATS_TEST_TMPDIR/link-to-main"
+		[ "$status" -eq 1 ]
+		[[ "$output" == *"won't delete the main folder"* ]] || false
+	fi
 	# The main worktree, whatever it's called, outside any layout
 	unset WT_WORKTREE_REPO_LOCATION
 	cd "$BATS_TEST_TMPDIR"
@@ -1788,6 +1791,7 @@ porcelain_run() {
 	[ "${#lines[@]}" -eq 2 ]
 	[ "${lines[0]}" -ef "$WT_WORKTREE_REPO_LOCATION/feature_p" ]
 	[ "${lines[1]}" -ef "$MAIN" ]
+	command -v zsh >/dev/null 2>&1 || skip "zsh isn't installed (the bash half passed)"
 	run zsh -f -c 'source "$1/wt.sh" && cd "$2" && wt cd --porcelain feature/p 2>/dev/null && pwd' _ "$WT" "$MAIN"
 	[ "$status" -eq 0 ]
 	[ "${lines[0]}" -ef "$WT_WORKTREE_REPO_LOCATION/feature_p" ]
