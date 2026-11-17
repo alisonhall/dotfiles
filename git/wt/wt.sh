@@ -10,7 +10,7 @@
 #   * EXECUTED (bash wt.sh <sub> [args...]): dispatches to the matching
 #     wt-*.sh script in this folder.
 #
-# Subcommands: add, cd, rm, ls, link, clean, setup, help
+# Subcommands: add, cd, rm, ls, link, clean, setup, config, help
 #
 # shell/common/git.sh only needs to source this file (`. "$WT_DIR/wt.sh"`) —
 # no per-command aliases. `wt help` lists every command, description, and option.
