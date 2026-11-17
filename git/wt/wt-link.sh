@@ -47,12 +47,12 @@ while [ $# -gt 0 ]; do
 			exit 0
 			;;
 		-*)
-			echo "wt-link: unknown option: $1 (see -h)" >&2
+			echo "wt-link: unknown option $1 (see wt link -h)." >&2
 			exit 2
 			;;
 		*)
 			if [ -n "$BRANCH" ]; then
-				echo "wt-link: unexpected argument: $1" >&2
+				echo "wt-link: name one branch or folder, not '$BRANCH' and '$1'." >&2
 				exit 2
 			fi
 			BRANCH="$1"
@@ -71,10 +71,7 @@ if [ -z "${WT_WORKTREE_REPO_LOCATION:-}" ]; then
 		echo "wt-link: $BRANCH isn't a branch's folder beside a main folder of the same repo." >&2
 		exit 1
 	fi
-	echo "error: WT_WORKTREE_REPO_LOCATION is not set." >&2
-	echo "       Export it in local/shell_local.sh (the worktree collection folder, e.g. \$HOME/Sites/fe)," >&2
-	echo "       or run wt in the repo's main folder, or a branch's folder beside it." >&2
-	exit 2
+	wt_not_configured wt-link
 fi
 REPO_ROOT="$WT_WORKTREE_REPO_LOCATION"
 
@@ -83,7 +80,7 @@ REPO_ROOT="$WT_WORKTREE_REPO_LOCATION"
 # layout (fe/main/.git). The collection folder itself is not a git repo in the
 # latter, so we anchor on main rather than the folder.
 if ! git -C "$REPO_ROOT/main" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-	echo "wt-link: no git worktree found at $REPO_ROOT/main."
+	echo "wt-link: there's no git worktree at $REPO_ROOT/main. Check WT_WORKTREE_REPO_LOCATION, or run wt in the repo's main folder." >&2
 	exit 1
 fi
 REPO_ROOT="$(cd "$REPO_ROOT" && pwd -P)"
@@ -107,11 +104,12 @@ if [ "$ALL" -eq 0 ] && [ -z "$BRANCH" ]; then
 	if ! FOLDER="$(in_layout "$PWD")"; then
 		if [ "$(git rev-parse --show-toplevel 2>/dev/null)" -ef "$MAIN_WT" ]; then
 			echo "wt-link: this is the main folder, which the links point at. Run it in a branch's folder, or name one." >&2
+			exit 1
 		else
-			echo "Usage: wt-link [<branch> | <folder> | --all]   (add --check to only inspect)" >&2
-			echo "       Without a branch or folder, run it in a branch's folder beside $MAIN_WT." >&2
+			echo "Usage: wt link [<branch> | <folder> | --all]   (add --check to only inspect)" >&2
+			echo "wt-link: this isn't a branch's folder beside $MAIN_WT. Run it in one, or name one." >&2
 		fi
-		exit 1
+		exit 2
 	fi
 elif [ -n "$BRANCH" ] && is_folder_arg "$BRANCH"; then
 	if ! FOLDER="$(in_layout "$BRANCH")"; then
@@ -292,9 +290,9 @@ if [ "$overall" -eq 0 ]; then
 	echo "All checked worktrees have correct symlinks."
 else
 	if [ "$CHECK_ONLY" -eq 1 ]; then
-		echo "Issues found (check-only; re-run without --check to fix)."
+		echo "wt-link: found links that aren't right (above). Run wt link without --check to fix them." >&2
 	else
-		echo "Done; some issues could not be auto-fixed (see above)."
+		echo "wt-link: some links couldn't be fixed (above). Fix those by hand, then run wt link --check." >&2
 	fi
 fi
 exit "$overall"

@@ -4,12 +4,10 @@
 # Invoked by the wt function (git/wt/wt.sh), sourced from shell/common/git.sh.
 # The wrapper handles the interactive-shell cd; this script does the git work.
 
-if [ -z "${WT_WORKTREE_REPO_LOCATION:-}" ]; then
-	echo "error: WT_WORKTREE_REPO_LOCATION is not set." >&2
-	echo "       Export it in local/shell_local.sh (the worktree collection folder, e.g. \$HOME/Sites/fe)," >&2
-	echo "       or run wt in the repo's main folder, or a branch's folder beside it." >&2
-	exit 2
-fi
+# Shared helpers (wt_not_configured, find_merged_pr, etc.)
+source "$(cd "$(dirname "$0")" && pwd)/wt-common.sh"
+
+[ -n "${WT_WORKTREE_REPO_LOCATION:-}" ] || wt_not_configured wt-cd
 CURRENT_REMOTE_NAME="${CURRENT_REMOTE_NAME:-origin}"
 
 # --pr <number>: the pull request's folder, made first by wt add --pr if it isn't there (which
@@ -19,20 +17,20 @@ if [ "${1:-}" = --pr ]; then
 	PR_NUMBER="${2:-}"
 	case "$PR_NUMBER" in
 		'' | *[!0-9]*)
-			echo "wt-cd: --pr takes a pull request's number, not '$PR_NUMBER'" >&2
-			exit 1
+			echo "wt-cd: --pr takes a pull request's number, not '$PR_NUMBER'." >&2
+			exit 2
 			;;
 	esac
-	[ $# -eq 2 ] || { echo "Usage: wt-cd <branch-name>, or wt-cd --pr <number>" >&2; exit 1; }
+	[ $# -eq 2 ] || { echo "Usage: wt cd <branch-name>, or wt cd --pr <number>" >&2; echo "wt-cd: give --pr <number> on its own." >&2; exit 2; }
 	pr_folder_file="$(mktemp "${TMPDIR:-/tmp}/wt-cd.XXXXXX")" || exit 1
 	trap 'rm -f "$pr_folder_file"' EXIT
 	trap 'exit 130' INT
 	WT_CD_FILE="$pr_folder_file" bash "$(cd "$(dirname "$0")" && pwd)/wt-add.sh" --pr "$PR_NUMBER" || exit
 	pr_folder="$(cat "$pr_folder_file")"
-	[ -n "$pr_folder" ] || { echo "wt-cd: wt add --pr $PR_NUMBER didn't say which folder it used." >&2; exit 1; }
+	[ -n "$pr_folder" ] || { echo "error: wt-cd: wt add --pr $PR_NUMBER didn't say which folder it used." >&2; exit 1; }
 	# Its branch, as named in the folder (the folder is named after it)
 	REMOTE_BRANCH_NAME="$(git -C "$pr_folder" symbolic-ref --quiet --short HEAD 2>/dev/null)" || {
-		echo "wt-cd: $pr_folder has no branch checked out." >&2
+		echo "wt-cd: $pr_folder has no branch checked out, so wt cd can't follow its pull request. Check out pr-$PR_NUMBER there, or remove the folder." >&2
 		exit 1
 	}
 	set -- "$REMOTE_BRANCH_NAME"
@@ -44,14 +42,16 @@ LOCAL_BRANCH_NAME="${REMOTE_BRANCH_NAME//\//_}"
 # No other options (--strict is wt add's); no branch name starts with -
 case "$REMOTE_BRANCH_NAME" in
 	-*)
-		echo "wt-cd: unknown option $REMOTE_BRANCH_NAME" >&2
-		exit 1
+		echo "Usage: wt cd <branch-name>, or wt cd --pr <number>" >&2
+		echo "wt-cd: unknown option $REMOTE_BRANCH_NAME." >&2
+		exit 2
 		;;
 esac
 
 if [ -z "$REMOTE_BRANCH_NAME" ]; then
-	echo "Usage: wt-cd <branch-name>, or wt-cd --pr <number>"
-	exit 1
+	echo "Usage: wt cd <branch-name>, or wt cd --pr <number>" >&2
+	echo "wt-cd: give a branch name, or --pr <number>." >&2
+	exit 2
 fi
 
 # Anchor for fetch_pr_head (wt-common.sh): the main worktree is a valid git
@@ -61,9 +61,6 @@ fi
 MAIN_WT="$WT_WORKTREE_REPO_LOCATION/main"
 
 worktree_path="$WT_WORKTREE_REPO_LOCATION/$LOCAL_BRANCH_NAME"
-
-# Shared helpers (find_merged_pr, etc.)
-source "$(cd "$(dirname "$0")" && pwd)/wt-common.sh"
 
 # The remote branch is gone (e.g. deleted after a squash merge). If the `gh`
 # CLI is available, find the merged PR whose head was this branch and check
@@ -94,8 +91,7 @@ fetch_branch_or_recover() {
 	echo "Remote branch '$REMOTE_BRANCH_NAME' not found on $CURRENT_REMOTE_NAME (it may have been deleted after merging)."
 
 	if ! command -v gh >/dev/null 2>&1; then
-		echo "wt-cd: the 'gh' CLI is not available, so I can't look up the merged PR to recover this branch."
-		echo "Install gh (https://cli.github.com) and re-run, or review the squash commit on the main branch directly."
+		echo "wt-cd: '$REMOTE_BRANCH_NAME' isn't on $CURRENT_REMOTE_NAME, and without gh its merged PR can't be found. Install gh (https://cli.github.com) and run this again." >&2
 		exit 1
 	fi
 
@@ -104,7 +100,7 @@ fetch_branch_or_recover() {
 	pr_number="$(find_merged_pr)"
 
 	if [ -z "$pr_number" ]; then
-		echo "wt-cd: no merged PR found with head branch '$REMOTE_BRANCH_NAME'. Nothing to recover."
+		echo "wt-cd: '$REMOTE_BRANCH_NAME' isn't on $CURRENT_REMOTE_NAME, and no merged PR had it as its head, so there's nothing to recover." >&2
 		exit 1
 	fi
 
@@ -112,7 +108,7 @@ fetch_branch_or_recover() {
 	# fetch_pr_head returns the full commit SHA (not FETCH_HEAD, which is
 	# per-worktree and would be invisible from this worktree's CWD).
 	if ! pr_head_sha="$(fetch_pr_head "$pr_number")"; then
-		echo "wt-cd: failed to fetch refs/pull/$pr_number/head from $CURRENT_REMOTE_NAME."
+		echo "error: wt-cd: couldn't fetch refs/pull/$pr_number/head, merged PR #$pr_number's head, from $CURRENT_REMOTE_NAME." >&2
 		exit 1
 	fi
 
@@ -121,21 +117,21 @@ fetch_branch_or_recover() {
 	# the worktree if the folder is missing.
 	if [ -e "$worktree_path/.git" ]; then
 		if ! git checkout --detach "$pr_head_sha"; then
-			echo "wt-cd: failed to check out the PR head commit in $worktree_path."
+			echo "error: wt-cd: git couldn't check out PR #$pr_number's head in $worktree_path (its message is above)." >&2
 			exit 1
 		fi
 	elif [ -e "$worktree_path" ]; then
-		echo "wt-cd: a folder named $LOCAL_BRANCH_NAME already exists at $worktree_path but is not a git worktree. Aborting so nothing is overwritten."
+		echo "wt-cd: $worktree_path already exists but isn't a worktree, so nothing was made (it would be overwritten). Move or delete it, then run this again." >&2
 		exit 1
 	else
 		if ! git worktree add --detach "$worktree_path" "$pr_head_sha"; then
-			echo "wt-cd: failed to create worktree folder $LOCAL_BRANCH_NAME."
+			echo "error: wt-cd: git couldn't make the worktree for $REMOTE_BRANCH_NAME (its message is above), so nothing was made." >&2
 			exit 1
 		fi
 	fi
 
 	if [ ! -d "$worktree_path" ]; then
-		echo "wt-cd: failed to create worktree folder $LOCAL_BRANCH_NAME."
+		echo "error: wt-cd: git couldn't make the worktree for $REMOTE_BRANCH_NAME, so nothing was made." >&2
 		exit 1
 	fi
 
@@ -148,8 +144,8 @@ if [ ! -e "$worktree_path" ]; then
 fi
 
 if [ -e "$worktree_path/.git" ] && held="$(other_branch_in "$worktree_path" "$REMOTE_BRANCH_NAME")"; then
-	echo "wt-cd: the folder $LOCAL_BRANCH_NAME holds branch $held, not $REMOTE_BRANCH_NAME"
-	echo "       (/ becomes _ in folder names, so both branches would use that folder)."
+	echo "wt-cd: / becomes _ in folder names, so $REMOTE_BRANCH_NAME and $held would share a folder." >&2
+	echo "wt-cd: the folder $LOCAL_BRANCH_NAME holds branch $held, not $REMOTE_BRANCH_NAME. Remove it (wt rm $held) first." >&2
 	exit 1
 fi
 

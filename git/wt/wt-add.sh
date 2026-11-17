@@ -3,12 +3,11 @@
 # Invoked by the wt function (git/wt/wt.sh), sourced from shell/common/git.sh.
 # The wrapper handles the interactive-shell cd; this script does the git work.
 
-if [ -z "${WT_WORKTREE_REPO_LOCATION:-}" ]; then
-	echo "error: WT_WORKTREE_REPO_LOCATION is not set." >&2
-	echo "       Export it in local/shell_local.sh (the worktree collection folder, e.g. \$HOME/Sites/fe)," >&2
-	echo "       or run wt add in the repo's main folder, or a branch's folder beside it." >&2
-	exit 2
-fi
+# Shared helpers (wt_not_configured, find_merged_pr, fetch_pr_head, link_workspaces,
+# setup_worktree_symlinks)
+source "$(cd "$(dirname "$0")" && pwd)/wt-common.sh"
+
+[ -n "${WT_WORKTREE_REPO_LOCATION:-}" ] || wt_not_configured wt-add
 CURRENT_REMOTE_NAME="${CURRENT_REMOTE_NAME:-origin}"
 CURRENT_DEV_BRANCH="${CURRENT_DEV_BRANCH:-main}"
 
@@ -24,37 +23,37 @@ STRICT=0
 REMOTE_BRANCH_NAME=""
 PR_NUMBER=""
 usage() {
-	echo "Usage: wt-add [--strict] <branch-name>, or wt-add --pr <number>" >&2
-	exit 1
+	echo "Usage: wt add [--strict] <branch-name>, or wt add --pr <number>" >&2
+	echo "wt-add: ${1:-give one branch name, or --pr <number>.}" >&2
+	exit 2
 }
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--strict) STRICT=1 ;;
 		--pr)
-			[ $# -ge 2 ] || usage
+			[ $# -ge 2 ] || usage "--pr takes a pull request's number."
 			PR_NUMBER="$2"
 			shift
 			case "$PR_NUMBER" in
 				'' | *[!0-9]*)
-					echo "wt-add: --pr takes a pull request's number, not '$PR_NUMBER'" >&2
-					exit 1
+					echo "wt-add: --pr takes a pull request's number, not '$PR_NUMBER'." >&2
+					exit 2
 					;;
 			esac
 			;;
 		-*)
-			echo "wt-add: unknown option $1" >&2
-			exit 1
+			usage "unknown option $1."
 			;;
 		*)
-			[ -z "$REMOTE_BRANCH_NAME" ] || usage
+			[ -z "$REMOTE_BRANCH_NAME" ] || usage "give one branch name, not '$REMOTE_BRANCH_NAME' and '$1'."
 			REMOTE_BRANCH_NAME="$1"
 			;;
 	esac
 	shift
 done
 if [ -n "$PR_NUMBER" ] && [ -n "$REMOTE_BRANCH_NAME" ]; then
-	echo "wt-add: give a branch or --pr <number>, not both" >&2
-	exit 1
+	echo "wt-add: give a branch or --pr <number>, not both." >&2
+	exit 2
 fi
 [ -n "$REMOTE_BRANCH_NAME" ] || [ -n "$PR_NUMBER" ] || usage
 
@@ -80,9 +79,11 @@ MAIN_WT="$WT_WORKTREE_REPO_LOCATION/main"
 
 cd "$WT_WORKTREE_REPO_LOCATION" || exit 1
 
-# Shared helpers (find_merged_pr, fetch_pr_head, link_workspaces,
-# setup_worktree_symlinks)
-source "$(cd "$(dirname "$0")" && pwd)/wt-common.sh"
+# worktree_add_failed <branch>: After git worktree add failed (git said why, above)
+worktree_add_failed() {
+	echo "error: wt-add: git couldn't make the worktree for $1 (its message is above), so nothing was made." >&2
+	exit 1
+}
 
 # add_pull_ref: PR_NUMBER's pull ref in pr-<number>, a branch tracking it (as gh pr checkout sets up
 # a fork's PR, so git pull and wt ls follow the PR), checked out in a folder of that name with the
@@ -92,7 +93,7 @@ add_pull_ref() {
 	folder="$WT_WORKTREE_REPO_LOCATION/$name"
 	if [ -e "$folder/.git" ]; then
 		if held="$(other_branch_in "$folder" "$name")"; then
-			echo "wt-add: the folder $name already holds branch $held, not $name" >&2
+			echo "wt-add: the folder $name already holds branch $held, not $name, so nothing was made. Remove it (wt rm $held) or use that branch." >&2
 			exit 1
 		fi
 		echo "Worktree folder $name already exists. Switching to it..."
@@ -100,7 +101,7 @@ add_pull_ref() {
 		exit 0
 	fi
 	if [ -e "$folder" ]; then
-		echo "wt-add: a folder named $name already exists at $folder but is not a git worktree. Aborting so nothing is overwritten." >&2
+		echo "wt-add: $folder already exists but isn't a worktree, so nothing was made (it would be overwritten). Move or delete it, then run this again." >&2
 		exit 1
 	fi
 	if ! found="$(git -C "$MAIN_WT" ls-remote "$CURRENT_REMOTE_NAME" "$ref")"; then
@@ -118,10 +119,10 @@ add_pull_ref() {
 	if git -C "$MAIN_WT" show-ref --verify --quiet "refs/heads/$name"; then
 		# Made before (its folder since removed): checked out as it is, as for a branch's name
 		echo "Branch $name already exists. Creating its worktree..."
-		git -C "$MAIN_WT" worktree add "$folder" "$name" || exit 1
+		git -C "$MAIN_WT" worktree add "$folder" "$name" || worktree_add_failed "$name"
 	else
 		echo "Creating $name from PR #$PR_NUMBER's head (${sha:0:7}), tracking $ref on $CURRENT_REMOTE_NAME..."
-		git -C "$MAIN_WT" worktree add --no-track -b "$name" "$folder" "$sha" || exit 1
+		git -C "$MAIN_WT" worktree add --no-track -b "$name" "$folder" "$sha" || worktree_add_failed "$name"
 		git -C "$MAIN_WT" config "branch.$name.remote" "$CURRENT_REMOTE_NAME"
 		git -C "$MAIN_WT" config "branch.$name.merge" "$ref"
 	fi
@@ -207,8 +208,8 @@ LOCAL_BRANCH_NAME="${REMOTE_BRANCH_NAME//\//_}"
 worktree_path="$WT_WORKTREE_REPO_LOCATION/$LOCAL_BRANCH_NAME"
 if [ -e "$worktree_path/.git" ]; then
 	if held="$(other_branch_in "$worktree_path" "$REMOTE_BRANCH_NAME")"; then
-		echo "wt-add: the folder $LOCAL_BRANCH_NAME already holds branch $held, not $REMOTE_BRANCH_NAME"
-		echo "        (/ becomes _ in folder names, so both branches would use that folder)."
+		echo "wt-add: / becomes _ in folder names, so $REMOTE_BRANCH_NAME and $held would share a folder." >&2
+		echo "wt-add: the folder $LOCAL_BRANCH_NAME already holds branch $held, not $REMOTE_BRANCH_NAME, so nothing was made. Remove it (wt rm $held) first." >&2
 		exit 1
 	fi
 	echo "Worktree folder $LOCAL_BRANCH_NAME already exists. Switching to it..."
@@ -216,7 +217,7 @@ if [ -e "$worktree_path/.git" ]; then
 	exit 0
 fi
 if [ -e "$worktree_path" ]; then
-	echo "wt-add: a folder named $LOCAL_BRANCH_NAME already exists at $worktree_path but is not a git worktree. Aborting so nothing is overwritten."
+	echo "wt-add: $worktree_path already exists but isn't a worktree, so nothing was made (it would be overwritten). Move or delete it, then run this again." >&2
 	exit 1
 fi
 
@@ -234,10 +235,10 @@ if [ -n "$remote_head" ]; then
 	git -C "$MAIN_WT" fetch "$CURRENT_REMOTE_NAME" "$REMOTE_BRANCH_NAME"
 	if git -C "$MAIN_WT" show-ref --verify --quiet "refs/heads/$REMOTE_BRANCH_NAME"; then
 		# Local branch already exists (e.g. the folder was removed) — check it out, don't re-create it.
-		git -C "$MAIN_WT" worktree add "$worktree_path" "$REMOTE_BRANCH_NAME"
+		git -C "$MAIN_WT" worktree add "$worktree_path" "$REMOTE_BRANCH_NAME" || worktree_add_failed "$REMOTE_BRANCH_NAME"
 	else
 		# Create a local branch named exactly like the remote branch, tracking it, in the underscore-named folder.
-		git -C "$MAIN_WT" worktree add --track -b "$REMOTE_BRANCH_NAME" "$worktree_path" "$CURRENT_REMOTE_NAME/$REMOTE_BRANCH_NAME"
+		git -C "$MAIN_WT" worktree add --track -b "$REMOTE_BRANCH_NAME" "$worktree_path" "$CURRENT_REMOTE_NAME/$REMOTE_BRANCH_NAME" || worktree_add_failed "$REMOTE_BRANCH_NAME"
 	fi
 else
 	# With --pr, a branch deleted after its PR was merged or closed: its pull ref
@@ -252,7 +253,7 @@ else
 		# per-worktree). The SHA resolves from any worktree via the shared
 		# object store.
 		if pr_head_sha="$(fetch_pr_head "$pr_number")"; then
-			git -C "$MAIN_WT" worktree add --detach "$worktree_path" "$pr_head_sha"
+			git -C "$MAIN_WT" worktree add --detach "$worktree_path" "$pr_head_sha" || worktree_add_failed "$REMOTE_BRANCH_NAME"
 			echo "Checked out PR #$pr_number head (${pr_head_sha:0:7}) in $LOCAL_BRANCH_NAME for review."
 			cd "$WT_WORKTREE_REPO_LOCATION/$LOCAL_BRANCH_NAME"
 			tell_folder "$worktree_path"
@@ -260,7 +261,7 @@ else
 			exit 0
 		else
 			refuse_new_branch 4 "couldn't fetch refs/pull/$pr_number/head, the head of merged PR #$pr_number"
-			echo "wt-add: failed to fetch refs/pull/$pr_number/head; falling back to new local branch."
+			echo "wt-add: failed to fetch refs/pull/$pr_number/head; falling back to new local branch." >&2
 		fi
 	fi
 	refuse_new_branch 3 "branch '$REMOTE_BRANCH_NAME' isn't on $CURRENT_REMOTE_NAME"
@@ -268,16 +269,13 @@ else
 	echo "Remote branch '$REMOTE_BRANCH_NAME' not found on $CURRENT_REMOTE_NAME. Creating a new local branch '$REMOTE_BRANCH_NAME' from $CURRENT_DEV_BRANCH..."
 	if git -C "$MAIN_WT" show-ref --verify --quiet "refs/heads/$REMOTE_BRANCH_NAME"; then
 		# Local branch already exists — check it out, don't re-create it.
-		git -C "$MAIN_WT" worktree add "$worktree_path" "$REMOTE_BRANCH_NAME"
+		git -C "$MAIN_WT" worktree add "$worktree_path" "$REMOTE_BRANCH_NAME" || worktree_add_failed "$REMOTE_BRANCH_NAME"
 	else
-		git -C "$MAIN_WT" worktree add -b "$REMOTE_BRANCH_NAME" "$worktree_path" "$CURRENT_DEV_BRANCH"
+		git -C "$MAIN_WT" worktree add -b "$REMOTE_BRANCH_NAME" "$worktree_path" "$CURRENT_DEV_BRANCH" || worktree_add_failed "$REMOTE_BRANCH_NAME"
 	fi
 fi
 
-if [ ! -d "$WT_WORKTREE_REPO_LOCATION/$LOCAL_BRANCH_NAME" ]; then
-	echo "wt-add: failed to create worktree folder $LOCAL_BRANCH_NAME."
-	exit 1
-fi
+[ -d "$worktree_path" ] || worktree_add_failed "$REMOTE_BRANCH_NAME"
 cd "$WT_WORKTREE_REPO_LOCATION/$LOCAL_BRANCH_NAME"
 echo "Worktree folder $LOCAL_BRANCH_NAME created and branch checked out."
 tell_folder "$worktree_path"

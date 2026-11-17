@@ -72,7 +72,7 @@ if [ "$_wt_sourced" = "1" ]; then
         local location
         location="$(_wt_layout_location)" || location="${WT_WORKTREE_REPO_LOCATION:-}"
         if [ -z "$location" ]; then
-          echo "error: WT_WORKTREE_REPO_LOCATION is not set (see wt help)." >&2
+          echo "error: wt main: WT_WORKTREE_REPO_LOCATION is not set, and this isn't a folder of wt's layout. Run it in a branch's folder beside main, or export WT_WORKTREE_REPO_LOCATION (see wt help)." >&2
           return 2
         fi
         cd "$location/main"
@@ -83,9 +83,8 @@ if [ "$_wt_sourced" = "1" ]; then
         # likely the wrong one, so stop before making anything. (bash and zsh count subshells in
         # different variables.)
         if [ "${BASH_SUBSHELL:-${ZSH_SUBSHELL:-0}}" -gt 0 ]; then
-          echo "wt $sub: this ran in the background or a subshell, so it couldn't move your terminal - stopping." >&2
-          echo "  If the branch name has a character like & or ; in it, the shell split the name there." >&2
-          echo "  Run \`wt $sub\` on its own and paste the name when it asks, or put the name in single quotes." >&2
+          echo "wt $sub: if the branch name has a character like & or ; in it, the shell split the name there." >&2
+          echo "wt $sub: this ran in the background or a subshell, so it couldn't move your terminal, and made nothing. Run \`wt $sub\` on its own and paste the name when it asks, or put the name in single quotes." >&2
           return 1
         fi
         # The branch: the argument that isn't an option, like --strict (no branch name starts
@@ -110,10 +109,15 @@ if [ "$_wt_sourced" = "1" ]; then
             *) branch="$arg" ;;
           esac
         done
+        # (With no terminal, as when a tool runs wt, read finds no input and this stops at once)
         if [ -z "$branch" ] && [ -z "$pr" ] && [ -z "$unknown" ]; then
           printf 'Branch name: ' >&2
-          read -r branch || return 1
-          [ -n "$branch" ] || { echo "wt $sub: no branch name given" >&2; return 1; }
+          read -r branch || branch=""
+          if [ -z "$branch" ]; then
+            echo >&2
+            echo "wt $sub: no branch name was given, so nothing was done. Name the branch: wt $sub <branch>." >&2
+            return 2
+          fi
           set -- "$@" "$branch"
         fi
         # Where the folder is: the one the script names in WT_CD_FILE (for --pr, only it knows);
@@ -295,6 +299,20 @@ Commands:
                           startup file. Asks before changing anything.
   help                    Show this help.
 
+Exit codes (every command):
+  0   done
+  1   refused or failed: nothing was changed, or it stopped partway and
+      says what's left
+  2   usage (an unknown option, a missing argument) or not configured
+      (no layout found and WT_WORKTREE_REPO_LOCATION not set)
+  3   add --strict / add --pr: the branch or pull request isn't there
+  4   add --strict / add --pr: the remote or gh couldn't be asked
+  On failure, every message goes to stderr, and the last line is one
+  sentence saying what went wrong and what to do. (A tool that runs wt can
+  show that line, or the first line starting fatal: or error:.)
+  Nothing waits for an answer without a terminal: wt rm stops instead of
+  asking (add --yes), and wt add/cd with no branch stop instead of asking.
+
 Examples:
   wt add yourname/TICKET-123/my-feature
   wt cd  yourname/TICKET-123/my-feature
@@ -327,7 +345,7 @@ Requirements:
 HELP
     ;;
   *)
-    echo "wt: unknown command '$sub' (see 'wt help')" >&2
+    echo "wt: unknown command '$sub'. Run wt help to see the commands." >&2
     exit 2
     ;;
 esac
