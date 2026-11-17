@@ -9,7 +9,6 @@ source "$(cd "$(dirname "$0")" && pwd)/wt-common.sh"
 
 [ -n "${WT_WORKTREE_REPO_LOCATION:-}" ] || wt_not_configured wt-add
 CURRENT_REMOTE_NAME="${CURRENT_REMOTE_NAME:-origin}"
-CURRENT_DEV_BRANCH="${CURRENT_DEV_BRANCH:-main}"
 
 # --strict: only a branch that's on the remote (or a merged PR's head, below) - never a new branch
 # from CURRENT_DEV_BRANCH, for a tool that wants a PR's branch and would otherwise get an empty
@@ -76,6 +75,7 @@ refuse_new_branch() {
 # fails there. main is a valid worktree in BOTH layouts (bare-repo and
 # normal-repo-at-main), so `git -C main` works everywhere.
 MAIN_WT="$WT_WORKTREE_REPO_LOCATION/main"
+resolve_dev_branch
 
 cd "$WT_WORKTREE_REPO_LOCATION" || exit 1
 

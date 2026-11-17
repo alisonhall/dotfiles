@@ -6,7 +6,8 @@
 # (a bare-repo + linked-worktrees layout) once their branch has been
 # SQUASH-merged into main via a PR.
 #
-# Configuration (exported from local/shell_local.sh; nothing is hardcoded here):
+# Configuration (from the clone's git config - wt.repoSlug, wt.protectedBranch, ... - which wt.sh
+# reads into these, or exported; nothing is hardcoded here):
 #   WT_WORKTREE_REPO_LOCATION  worktree collection folder (e.g. $HOME/Sites/fe)
 #   WT_REPO_SLUG               GitHub repo slug (e.g. owner/repo)
 #   WT_PROTECTED_BRANCHES      space-separated branches never removed (default: main)
@@ -149,10 +150,13 @@ MAIN_WT="$REPO_ROOT/main"
 REPO_SLUG="$WT_REPO_SLUG"
 REMOTE_NAME="${CURRENT_REMOTE_NAME:-origin}"
 # Branches that must never be removed (space-separated). Defaults to "main", and the branch new
-# branches start from (CURRENT_DEV_BRANCH) is always protected too. (The main folder itself is
+# branches start from (resolve_dev_branch: CURRENT_DEV_BRANCH, wt.devBranch, the remote's default
+# branch, or main) is always protected too. (The main folder itself is
 # skipped by path, whatever branch it holds.)
 PROTECTED=(${WT_PROTECTED_BRANCHES:-main})
-[[ -n "${CURRENT_DEV_BRANCH:-}" ]] && PROTECTED+=("$CURRENT_DEV_BRANCH")
+CURRENT_REMOTE_NAME="$REMOTE_NAME"
+resolve_dev_branch
+PROTECTED+=("$CURRENT_DEV_BRANCH")
 
 # Regenerable build artifacts that are safe to discard on removal (not user
 # work). Gate 5 skips these so a worktree with a real node_modules / build

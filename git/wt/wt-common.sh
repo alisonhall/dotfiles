@@ -18,6 +18,21 @@ wt_not_configured() {
 	exit 2
 }
 
+# resolve_dev_branch: Sets CURRENT_DEV_BRANCH, the branch new branches start from (and wt rm and
+# wt clean never delete), from the first of: CURRENT_DEV_BRANCH itself, the clone's git config
+# wt.devBranch, the remote's default branch as the clone knows it (refs/remotes/<remote>/HEAD, set
+# by git clone or git remote set-head <remote> --auto), and main. Needs MAIN_WT; never fetches.
+resolve_dev_branch() {
+	local remote="${CURRENT_REMOTE_NAME:-origin}" ref
+	[ -n "${CURRENT_DEV_BRANCH:-}" ] && return 0
+	# (|| true: wt-clean.sh runs with set -e, and these fail when there's nothing to find)
+	CURRENT_DEV_BRANCH="$(git -C "$MAIN_WT" config --get wt.devBranch 2>/dev/null)" || true
+	[ -n "$CURRENT_DEV_BRANCH" ] && return 0
+	ref="$(git -C "$MAIN_WT" symbolic-ref --quiet --short "refs/remotes/$remote/HEAD" 2>/dev/null)" || true
+	CURRENT_DEV_BRANCH="${ref#"$remote"/}"
+	[ -n "$CURRENT_DEV_BRANCH" ] || CURRENT_DEV_BRANCH=main
+}
+
 # pull_ref_number <branch>: If <branch> follows a pull request's head, refs/pull/<n>/head (as
 # wt add --pr and gh pr checkout set up a fork's PR), prints <n> and succeeds. Such a branch isn't
 # on the remote under its own name, so it's fetched, compared and looked up by its PR instead.

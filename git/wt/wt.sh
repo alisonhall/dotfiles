@@ -199,10 +199,73 @@ sub="${1:-help}"
 
 run() { exec bash "$WT_DIR/$1" "${@:2}"; }
 
+# Per-repo settings, as "<variable>:<git config key>:<single|multi>". They're read from the clone's
+# git config (main/.git/config, or .bare/config - shared by every worktree, never committed), where
+# wt setup writes them, so plain wt works in any repo with no per-repo command. A multi key has an
+# entry per value (git config --add), joined with spaces as the scripts expect.
+WT_SETTINGS="WT_REPO_SLUG:repoSlug:single CURRENT_DEV_BRANCH:devBranch:single CURRENT_REMOTE_NAME:remote:single
+WT_PROTECTED_BRANCHES:protectedBranch:multi WT_SAFE_ARTIFACTS:safeArtifact:multi WT_SYMLINK_PAIRS:symlinkPair:multi"
+
+# load_git_config <main folder> <own>: Exports each setting the clone's git config has. With <own>
+# 1, the environment's values are this repo's own (its command passed them, with its location),
+# so one set there wins; with 0, they may be another repo's, so git config wins. Records where each
+# value came from in from_<variable> (env, git config), for wt config.
+load_git_config() {
+	local entry var key kind value
+	for entry in $WT_SETTINGS; do
+		IFS=: read -r var key kind <<< "$entry"
+		[ -n "${!var:-}" ] && printf -v "from_$var" '%s' env
+		if [ "$kind" = multi ]; then
+			value="$(git -C "$1" config --get-all "wt.$key" 2>/dev/null | tr '\n' ' ')"
+			value="${value% }"
+		else
+			value="$(git -C "$1" config --get "wt.$key" 2>/dev/null)"
+		fi
+		[ -n "$value" ] || continue
+		[ "$2" = 1 ] && [ -n "${!var:-}" ] && continue
+		export "$var=$value"
+		printf -v "from_$var" '%s' "git config wt.$key"
+	done
+}
+
+# show_config: wt config - each setting wt would use here, and where it came from
+show_config() {
+	local entry var key kind value from ref remote="${CURRENT_REMOTE_NAME:-origin}" main
+	if [ -z "${WT_WORKTREE_REPO_LOCATION:-}" ]; then
+		echo "error: wt config: WT_WORKTREE_REPO_LOCATION is not set, and this isn't a folder of wt's layout. Run it in the repo's main folder (or a branch's folder beside it), or export WT_WORKTREE_REPO_LOCATION as the folder that holds main." >&2
+		exit 2
+	fi
+	main="$WT_WORKTREE_REPO_LOCATION/main"
+	printf '%-26s %s  (%s)\n' WT_WORKTREE_REPO_LOCATION "$WT_WORKTREE_REPO_LOCATION" "${from_location:-env}"
+	for entry in $WT_SETTINGS; do
+		IFS=: read -r var key kind <<< "$entry"
+		value="${!var:-}"
+		from="from_$var"
+		from="${!from:-}"
+		if [ -z "$value" ]; then
+			case "$var" in
+				WT_REPO_SLUG) value="(none)" from="gh finds the repo from the clone" ;;
+				CURRENT_REMOTE_NAME) value=origin from=default ;;
+				CURRENT_DEV_BRANCH)
+					if ref="$(git -C "$main" symbolic-ref --quiet --short "refs/remotes/$remote/HEAD" 2>/dev/null)"; then
+						value="${ref#"$remote"/}" from="$remote/HEAD"
+					else
+						value=main from="default; $remote/HEAD isn't set - git remote set-head $remote --auto sets it"
+					fi
+					;;
+				WT_PROTECTED_BRANCHES) value=main from=default ;;
+				*) value="(none)" from=default ;;
+			esac
+		fi
+		printf '%-26s %s  (%s)\n' "$var" "$value" "$from"
+	done
+}
+
 # Run in a folder of a layout (or, for wt link and rm, given one): that layout, whatever the settings
 # say. When they're another repo's (or not set), gh finds the repo from main's clone rather than
 # from WT_REPO_SLUG; when they're this one's, the slug is kept, as gh can't tell which repo a clone
-# with several remotes is.
+# with several remotes is. Then the clone's git config settings: they win over exported ones unless
+# WT_WORKTREE_REPO_LOCATION was given too and is this layout (the repo's own command passed them).
 layout_folder=""
 if [ "$sub" = link ] || [ "$sub" = rm ]; then
   for arg in "${@:2}"; do
@@ -211,11 +274,17 @@ if [ "$sub" = link ] || [ "$sub" = rm ]; then
   done
 fi
 case "$sub" in
-  add | cd | rm | ls | link | clean)
+  add | cd | rm | ls | link | clean | config)
+    own=1
     if location="$(_wt_layout_location "$layout_folder")"; then
-      [ "${WT_WORKTREE_REPO_LOCATION:-}" -ef "$location" ] || unset WT_REPO_SLUG
+      if ! [ "${WT_WORKTREE_REPO_LOCATION:-}" -ef "$location" ]; then
+        own=0
+        unset WT_REPO_SLUG
+      fi
       export WT_WORKTREE_REPO_LOCATION="$location"
+      from_location="the layout it's run in"
     fi
+    [ -n "${WT_WORKTREE_REPO_LOCATION:-}" ] && load_git_config "$WT_WORKTREE_REPO_LOCATION/main" "$own"
     ;;
 esac
 
@@ -227,6 +296,14 @@ case "$sub" in
   link)  run wt-link.sh  "${@:2}" ;;
   clean) run wt-clean.sh "${@:2}" ;;
   setup) run wt-setup.sh "${@:2}" ;;
+  config)
+    if [ $# -gt 1 ]; then
+      echo "Usage: wt config" >&2
+      echo "wt config: it takes no arguments; change a setting with git config wt.<key> (see wt help)." >&2
+      exit 2
+    fi
+    show_config
+    ;;
   help|-h|--help)
     cat <<'HELP'
 wt — git worktree manager (works with both the bare-repo and the
@@ -243,7 +320,7 @@ Commands:
                                        isn't on the remote (exit 3) or it
                                        can't be asked (exit 4), rather than
                                        making a new branch from
-                                       CURRENT_DEV_BRANCH
+                                       the dev branch (see below)
   add --pr <number>       The same for a pull request, its branch found by gh:
                           this repo's branch, or for a fork's PR (or a branch
                           since deleted) its pull ref in pr-<number>, tracking
@@ -295,8 +372,12 @@ Commands:
                                               (e.g. 30d, 12h, 4w, 90m)
   main                    cd into the main worktree.
   setup [--dry-run]       Set up a repo for wt: get it into the folder layout
-                          wt expects, and add a command for it to your shell's
-                          startup file. Asks before changing anything.
+                          wt expects, save its settings in the clone's git
+                          config, and (optionally) add a command for it to
+                          your shell's startup file. Asks before changing
+                          anything.
+  config                  Show each setting wt uses here, and where it came
+                          from (env, git config, origin/HEAD, default).
   help                    Show this help.
 
 Exit codes (every command):
@@ -321,17 +402,38 @@ Examples:
   wt clean                 # preview what would be removed
   wt clean --apply         # remove them
 
-Configuration (nothing is hardcoded here; each repo is configured by a
-per-repo alias that passes these WT_* values to `wt`, e.g. `my-repo-wt`).
-Run in a repo's main folder or a branch's folder beside it, wt works there
-without them, whatever WT_WORKTREE_REPO_LOCATION says (and WT_REPO_SLUG,
-when the location is another repo's):
-  WT_WORKTREE_REPO_LOCATION   worktree collection folder (e.g. $HOME/Sites/fe)
-  WT_REPO_SLUG                GitHub repo slug (owner/repo) used by `gh`
-  WT_PROTECTED_BRANCHES       branches never removed (default: main)
-  WT_SAFE_ARTIFACTS           extra safe-to-discard names
-  WT_SYMLINK_PAIRS            project-specific worktree symlinks
-                              (e.g. .cache, surfaces/x/.env)
+Settings (nothing is hardcoded here). Run in a repo's main folder or a
+branch's folder beside it, wt finds the repo from the folder, and reads the
+repo's settings from the clone's git config (main/.git/config, shared by
+every worktree, never committed). `wt setup` writes them; by hand:
+  git config wt.repoSlug owner/repo
+  git config --add wt.protectedBranch development   (one entry per value)
+  git config --unset-all wt.protectedBranch          (remove them)
+
+  Variable                    git config key       Means
+  WT_WORKTREE_REPO_LOCATION   (none: the folder)   the folder holding main,
+                                                   for running wt elsewhere
+  WT_REPO_SLUG                wt.repoSlug          GitHub repo (owner/repo)
+                                                   for gh; else gh asks the
+                                                   clone
+  CURRENT_DEV_BRANCH          wt.devBranch         branch new branches start
+                                                   from, never deleted;
+                                                   else <remote>/HEAD (git
+                                                   remote set-head origin
+                                                   --auto), else main
+  CURRENT_REMOTE_NAME         wt.remote            remote (default: origin)
+  WT_PROTECTED_BRANCHES       wt.protectedBranch   branches never removed
+                                                   (default: main) - multi
+  WT_SAFE_ARTIFACTS           wt.safeArtifact      extra safe-to-discard
+                                                   names - multi
+  WT_SYMLINK_PAIRS            wt.symlinkPair       files every branch folder
+                                                   shares with main (e.g.
+                                                   .env, .cache) - multi
+
+  The variables still work, e.g. from a per-repo command that sets them
+  for one `wt` call. In a layout, the clone's git config wins over exported
+  ones, unless WT_WORKTREE_REPO_LOCATION is set to that same layout (then
+  the variables are that repo's own, and win). wt config shows the result.
 
 Requirements:
   git   always (core of the tool)

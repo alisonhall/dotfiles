@@ -21,7 +21,8 @@
 #     branch does not match its folder name (folder = branch with / -> _)
 #     (happens after a manual checkout, a branch rename, or a non-unique name).
 #     The main folder is always called main, so it's flagged when it doesn't
-#     hold CURRENT_DEV_BRANCH (default: main) instead
+#     hold the dev branch instead (CURRENT_DEV_BRANCH, else git config
+#     wt.devBranch, else the remote's default branch, else main)
 #
 # By default this script runs `git fetch` first so the ahead/behind numbers
 # (which compare against the remote-tracking refs) are current. Use --no-fetch
@@ -58,8 +59,6 @@
 set -uo pipefail
 
 CURRENT_REMOTE_NAME="${CURRENT_REMOTE_NAME:-origin}"
-# The branch the main folder holds (the main folder is always called main)
-DEV_BRANCH="${CURRENT_DEV_BRANCH:-main}"
 
 # Fetch remote-tracking refs before computing ahead/behind (default on). Pass
 # --no-fetch to skip it (faster / offline); --fetch is the explicit default.
@@ -105,6 +104,9 @@ fi
 REPO_ROOT="$(cd "$REPO_ROOT" && pwd -P)"
 # Anchor for all central git ops (see the check above).
 MAIN_WT="$REPO_ROOT/main"
+# The branch the main folder holds (the main folder is always called main)
+resolve_dev_branch
+DEV_BRANCH="$CURRENT_DEV_BRANCH"
 
 # --- colour (only when stdout is a TTY and NO_COLOR is unset) ---------------
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
@@ -562,8 +564,9 @@ printf '  branch ≠ folder: %d\n' "$mismatch_count"
 # How to fix the main folder holding the wrong branch
 for i in "${!disp_branch[@]}"; do
 	[ "${disp_mismatch[$i]}" = "2" ] || continue
-	printf '\n%s\n' "The main folder should hold $DEV_BRANCH. If the repo's default branch isn't $DEV_BRANCH, set"
-	printf '%s\n' "CURRENT_DEV_BRANCH to it (in the repo's wt command, or exported); otherwise run:"
+	printf '\n%s\n' "The main folder should hold $DEV_BRANCH. If the repo's default branch isn't $DEV_BRANCH, tell"
+	printf '%s\n' "wt with git config wt.devBranch <branch> (or, if $CURRENT_REMOTE_NAME's default branch changed,"
+	printf '%s\n' "git remote set-head $CURRENT_REMOTE_NAME --auto); otherwise run:"
 	printf '  git -C "%s" switch %s\n' "$MAIN_WT" "$DEV_BRANCH"
 	break
 done
