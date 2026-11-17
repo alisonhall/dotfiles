@@ -199,42 +199,8 @@ sub="${1:-help}"
 
 run() { exec bash "$WT_DIR/$1" "${@:2}"; }
 
-# Per-repo settings, as "<variable>:<git config key>:<single|multi>". They're read from the clone's
-# git config (main/.git/config, or .bare/config - shared by every worktree, never committed), where
-# wt setup writes them, so plain wt works in any repo with no per-repo command. A multi key has an
-# entry per value (git config --add), joined with spaces as the scripts expect.
-WT_SETTINGS="WT_REPO_SLUG:repoSlug:single CURRENT_DEV_BRANCH:devBranch:single CURRENT_REMOTE_NAME:remote:single
-WT_PROTECTED_BRANCHES:protectedBranch:multi WT_SAFE_ARTIFACTS:safeArtifact:multi WT_SYMLINK_PAIRS:symlinkPair:multi"
-
-# forget_settings: Unsets every setting, for when the environment's values are another repo's
-forget_settings() {
-	local entry var
-	for entry in $WT_SETTINGS; do
-		unset "${entry%%:*}"
-	done
-}
-
-# load_git_config <main folder> <own>: Exports each setting the clone's git config has. With <own>
-# 1, the environment's values are this repo's own (its command passed them, with its location),
-# so one set there wins; with 0, they may be another repo's, so git config wins. Records where each
-# value came from in from_<variable> (env, git config), for wt config.
-load_git_config() {
-	local entry var key kind value
-	for entry in $WT_SETTINGS; do
-		IFS=: read -r var key kind <<< "$entry"
-		[ -n "${!var:-}" ] && printf -v "from_$var" '%s' env
-		if [ "$kind" = multi ]; then
-			value="$(git -C "$1" config --get-all "wt.$key" 2>/dev/null | tr '\n' ' ')"
-			value="${value% }"
-		else
-			value="$(git -C "$1" config --get "wt.$key" 2>/dev/null)"
-		fi
-		[ -n "$value" ] || continue
-		[ "$2" = 1 ] && [ -n "${!var:-}" ] && continue
-		export "$var=$value"
-		printf -v "from_$var" '%s' "git config wt.$key"
-	done
-}
+# Shared helpers: WT_SETTINGS, use_repo_settings, load_git_config
+source "$WT_DIR/wt-common.sh"
 
 # show_config: wt config - each setting wt would use here, and where it came from
 show_config() {
@@ -270,10 +236,8 @@ show_config() {
 }
 
 # Run in a folder of a layout (or, for wt link and rm, given one): that layout, whatever the settings
-# say. When WT_WORKTREE_REPO_LOCATION is another repo's, every exported setting is that repo's, so
-# none is used: only this clone's git config and the defaults (gh finds the repo from main's clone).
-# When it isn't set, exported settings are for every repo: git config wins over them, and the slug
-# is dropped (gh finds it). When it's this layout, they're this repo's own and win over git config.
+# say, with the settings use_repo_settings (wt-common.sh) picks for it. Elsewhere, the layout
+# WT_WORKTREE_REPO_LOCATION names, its exported settings first.
 layout_folder=""
 if [ "$sub" = link ] || [ "$sub" = rm ]; then
   for arg in "${@:2}"; do
@@ -283,19 +247,13 @@ if [ "$sub" = link ] || [ "$sub" = rm ]; then
 fi
 case "$sub" in
   add | cd | rm | ls | link | clean | config)
-    own=1
     if location="$(_wt_layout_location "$layout_folder")"; then
-      if [ -z "${WT_WORKTREE_REPO_LOCATION:-}" ]; then
-        own=0
-        unset WT_REPO_SLUG
-      elif ! [ "$WT_WORKTREE_REPO_LOCATION" -ef "$location" ]; then
-        own=0
-        forget_settings
-      fi
+      use_repo_settings "$location/main" "$location"
       export WT_WORKTREE_REPO_LOCATION="$location"
       from_location="the layout it's run in"
+    elif [ -n "${WT_WORKTREE_REPO_LOCATION:-}" ]; then
+      load_git_config "$WT_WORKTREE_REPO_LOCATION/main" 1
     fi
-    [ -n "${WT_WORKTREE_REPO_LOCATION:-}" ] && load_git_config "$WT_WORKTREE_REPO_LOCATION/main" "$own"
     ;;
 esac
 

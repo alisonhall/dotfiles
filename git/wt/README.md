@@ -305,7 +305,7 @@ git config --unset-all wt.protectedBranch         # remove a setting (all its va
 The variables still work (a list is its values separated by spaces, like `".env .cache"`), for example in a repo's own command or `export`ed in your startup file. Which wins:
 
 - A repo's own command, which sets `WT_WORKTREE_REPO_LOCATION` to that repo's folder along with the other variables: its variables win over git config.
-- Variables for another repo, with `WT_WORKTREE_REPO_LOCATION` pointing at that repo: run in this repo's folders, all of them are ignored, so nothing meant for one repo leaks into another. Only this repo's git config and the defaults are used.
+- Variables for another repo, with `WT_WORKTREE_REPO_LOCATION` pointing at that repo: run in this repo's folders, all of them are ignored, so nothing meant for one repo leaks into another. Only this repo's git config and the defaults are used. If `WT_WORKTREE_REPO_LOCATION` names a folder that doesn't exist (a typo, say), it counts as another repo, and `wt` warns on stderr.
 - A variable `export`ed for every repo, with `WT_WORKTREE_REPO_LOCATION` not set: run in a repo's folders, that repo's git config wins, and a setting the git config doesn't have is taken from the variable. `WT_REPO_SLUG` is ignored there (`gh` finds the repo).
 
 ## Shared files (node_modules, .env)

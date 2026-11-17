@@ -33,6 +33,66 @@ resolve_dev_branch() {
 	[ -n "$CURRENT_DEV_BRANCH" ] || CURRENT_DEV_BRANCH=main
 }
 
+# Per-repo settings, as "<variable>:<git config key>:<single|multi>". They're read from the clone's
+# git config (main/.git/config, or .bare/config - shared by every worktree, never committed), where
+# wt setup writes them, so plain wt works in any repo with no per-repo command. A multi key has an
+# entry per value (git config --add), joined with spaces as the scripts expect.
+WT_SETTINGS="WT_REPO_SLUG:repoSlug:single CURRENT_DEV_BRANCH:devBranch:single CURRENT_REMOTE_NAME:remote:single
+WT_PROTECTED_BRANCHES:protectedBranch:multi WT_SAFE_ARTIFACTS:safeArtifact:multi WT_SYMLINK_PAIRS:symlinkPair:multi"
+
+# forget_settings: Unsets every setting, for when the environment's values are another repo's
+forget_settings() {
+	local entry
+	for entry in $WT_SETTINGS; do
+		unset "${entry%%:*}"
+	done
+}
+
+# load_git_config <main folder> <own>: Exports each setting the clone's git config has. With <own>
+# 1, the environment's values are this repo's own (its command passed them, with its location),
+# so one set there wins; with 0, they may be another repo's, so git config wins. Records where each
+# value came from in from_<variable> (env, git config), for wt config.
+load_git_config() {
+	local entry var key kind value
+	for entry in $WT_SETTINGS; do
+		IFS=: read -r var key kind <<< "$entry"
+		[ -n "${!var:-}" ] && printf -v "from_$var" '%s' env
+		if [ "$kind" = multi ]; then
+			value="$(git -C "$1" config --get-all "wt.$key" 2>/dev/null | tr '\n' ' ')"
+			value="${value% }"
+		else
+			value="$(git -C "$1" config --get "wt.$key" 2>/dev/null)"
+		fi
+		[ -n "$value" ] || continue
+		[ "$2" = 1 ] && [ -n "${!var:-}" ] && continue
+		export "$var=$value"
+		printf -v "from_$var" '%s' "git config wt.$key"
+	done
+}
+
+# use_repo_settings <main folder> [<layout>]: Picks the settings for the layout <main folder> is
+# in (<layout> its folder), from where WT_WORKTREE_REPO_LOCATION points:
+# - At <layout>: the variables are this repo's own (its command passed them), and win over git config.
+# - At another repo: every variable is that repo's, so none is used - only this clone's git
+#   config and the defaults (gh finds the repo from main's clone). A folder that doesn't exist
+#   counts as another repo, with a warning, as it's most likely a typo.
+# - Nowhere: the variables are for every repo, so git config wins over them, and WT_REPO_SLUG is
+#   dropped (gh finds the repo from main's clone).
+use_repo_settings() {
+	local own=0
+	if [ -z "${WT_WORKTREE_REPO_LOCATION:-}" ]; then
+		unset WT_REPO_SLUG
+	elif [ -n "${2:-}" ] && [ "$WT_WORKTREE_REPO_LOCATION" -ef "$2" ]; then
+		own=1
+	else
+		if ! [ -d "$WT_WORKTREE_REPO_LOCATION" ]; then
+			echo "warning: WT_WORKTREE_REPO_LOCATION is $WT_WORKTREE_REPO_LOCATION, which doesn't exist, so its settings were ignored and this repo's git config was used. Check the path, or run wt config to see the settings." >&2
+		fi
+		forget_settings
+	fi
+	load_git_config "$1" "$own"
+}
+
 # pull_ref_number <branch>: If <branch> follows a pull request's head, refs/pull/<n>/head (as
 # wt add --pr and gh pr checkout set up a fork's PR), prints <n> and succeeds. Such a branch isn't
 # on the remote under its own name, so it's fetched, compared and looked up by its PR instead.
