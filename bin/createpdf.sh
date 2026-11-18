@@ -11,7 +11,7 @@ checkContinue()
 {
   echo "checkContinue..."
   while true; do
-    read -p "Do you wish to start again?  " yn
+    read -r -p "Do you wish to start again?  " yn
     case "$yn" in
         [Yy]* ) startScript; break;;
         [Nn]* ) exit;;
@@ -60,7 +60,7 @@ createPdfInLocation()
   echo "Enter 'y' to use above folder"
   echo "Otherwise, it will be saved in the current folder"
   while true; do
-    read -p "Answer: " yn
+    read -r -p "Answer: " yn
     case "$yn" in
         [yY] )
           inFolderAbove='true';
@@ -85,7 +85,7 @@ getNewPdfName()
   echo "Enter 'y' to use the existing value of: $pdfName"
   echo "Otherwise, enter the new name"
   while true; do
-    read -p "Answer: " yn
+    read -r -p "Answer: " yn
     case "$yn" in
         [yY] ) break;;
         * ) pdfName="$yn"; break;;
@@ -98,7 +98,8 @@ getNewPdfName()
 
 getFolderPath()
 {
-  read -p "What is the path of the directory? " folderPath
+  read -r -p "What is the path of the directory? " folderPath
+  folderPath="${folderPath/#\~/$HOME}"  # a typed ~ isn't expanded
   cd "$folderPath" || exit
   getNewPdfName
 }

@@ -80,7 +80,7 @@ checkContinue()
 {
   echo "checkContinue..."
   while true; do
-    read -p "Do you wish to start again?  " yn
+    read -r -p "Do you wish to start again?  " yn
     case "$yn" in
         [Yy]* ) startScript; break;;
         [Nn]* ) exit;;
@@ -91,7 +91,8 @@ checkContinue()
 
 getParentFolderPath()
 {
-  read -p "What is the path of the parent directory? " parentPath
+  read -r -p "What is the path of the parent directory? " parentPath
+  parentPath="${parentPath/#\~/$HOME}"  # a typed ~ isn't expanded
   cd "$parentPath" || exit
   getFolders
 }

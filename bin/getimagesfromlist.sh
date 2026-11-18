@@ -36,8 +36,9 @@ getUndownloadedImagesFromUrls()
 {
   echo "getUndownloadedImagesFromUrls..."
 
-  while read p; do
-    filename=$(echo ${p##*/})
+  while IFS= read -r p; do
+    p=${p%$'\r'}  # drop a Windows line ending, if the CSV has them
+    filename=${p##*/}
     if [ -a "$filename" ]
     then
       echo "Already have $filename"
