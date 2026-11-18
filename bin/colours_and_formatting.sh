@@ -29,8 +29,8 @@ allCombinations() {
 colourNumbers() {
     echo "COLOUR NUMBERS:"
     echo
-    echo "For using one of the 256 colors on the foreground (text color), the control sequence is “<Esc>[38;5;<ColorNumber>m” where ColorNumber is one of the following colors"
-    echo "For using one of the 256 colors on the background, the control sequence is “<Esc>[48;5;<ColorNumber>m” where ColorNumber is one of the following colors"
+    echo "For using one of the 256 colors on the foreground (text color), the control sequence is \"<Esc>[38;5;<ColorNumber>m\" where ColorNumber is one of the following colors"
+    echo "For using one of the 256 colors on the background, the control sequence is \"<Esc>[48;5;<ColorNumber>m\" where ColorNumber is one of the following colors"
     for fgbg in 38 48 ; do # Foreground / Background
         for color in {0..255} ; do # Colors
             # Display the color

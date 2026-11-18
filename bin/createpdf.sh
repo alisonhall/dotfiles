@@ -23,6 +23,7 @@ checkContinue()
 checkNumPagesInPDF()
 {
   echo "checkNumPagesInPDF..."
+  # shellcheck disable=SC2010  # image names here have no newlines
   NUMIMAGES=$(ls | grep -Ei '\.jpg$|\.jpeg$|\.png$|\.gif$|\.bmp$' 2> /dev/null | wc -l)
 
   if [ "$inFolderAbove" = "true" ]
@@ -47,6 +48,14 @@ checkNumPagesInPDF()
 
 createPdfInLocation()
 {
+  # The images in number order, kept whole even when their names have spaces
+  local images=() image
+  while IFS= read -r image; do
+    images+=("$image")
+  done < <(
+    # shellcheck disable=SC2010  # image names here have no newlines
+    ls | grep -Ei "\.jpg$|\.jpeg$|\.png$|\.gif$|\.bmp$" | sort -n
+  )
   echo "Do you want the PDF to be saved in the folder above this one?"
   echo "Enter 'y' to use above folder"
   echo "Otherwise, it will be saved in the current folder"
@@ -55,11 +64,11 @@ createPdfInLocation()
     case "$yn" in
         [yY] )
           inFolderAbove='true';
-          convert $(ls | grep -Ei "\.jpg$|\.jpeg$|\.png$|\.gif$|\.bmp$" | sort -n | tr "\n" " ") ../"$pdfName".pdf;
+          convert "${images[@]}" ../"$pdfName".pdf;
           break;;
         * )
           inFolderAbove='false';
-          convert $(ls | grep -Ei "\.jpg$|\.jpeg$|\.png$|\.gif$|\.bmp$" | sort -n | tr "\n" " ") "$pdfName".pdf;
+          convert "${images[@]}" "$pdfName".pdf;
           break;;
     esac
   done
@@ -90,7 +99,7 @@ getNewPdfName()
 getFolderPath()
 {
   read -p "What is the path of the directory? " folderPath
-  cd "$folderPath"
+  cd "$folderPath" || exit
   getNewPdfName
 }
 

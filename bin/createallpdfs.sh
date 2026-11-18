@@ -13,6 +13,7 @@ checkNumPagesInPDF()
 {
   echo "checkNumPagesInPDF..."
   NUMPAGES=$(exiftool -T -PageCount -s3 "../$pdfName.pdf")
+  # shellcheck disable=SC2010  # image names here have no newlines
   NUMIMAGES=$(ls | grep -Ei '\.jpg$|\.jpeg$|\.png$|\.gif$|\.bmp$' 2> /dev/null | wc -l)
 
   if [ "$NUMPAGES" -eq "$NUMIMAGES" ] && [ "$NUMIMAGES" -gt 0 ]
@@ -44,6 +45,7 @@ createPdf()
   then
     echo "$pdfName.pdf already exists"
   else
+    # shellcheck disable=SC2010  # image names here have no newlines
     ls | grep -Ei "\.jpg$|\.jpeg$|\.png$|\.gif$|\.bmp$" | sort -n | sed -e 's/^/"/' | sed -e 's/$/"/' | convert @- -quality 100 "../$pdfName.pdf"
     
     checkNumPagesInPDF
@@ -58,7 +60,7 @@ getFolders()
   do
     if [ -d "$f" ]
     then
-      cd "$f"
+      cd "$f" || exit
       echo "In folder: ${PWD##*/}"
       isInsideFolder='true'
       createPdf
@@ -90,7 +92,7 @@ checkContinue()
 getParentFolderPath()
 {
   read -p "What is the path of the parent directory? " parentPath
-  cd "$parentPath"
+  cd "$parentPath" || exit
   getFolders
 }
 

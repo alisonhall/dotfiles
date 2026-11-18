@@ -30,7 +30,7 @@ alias fix_stty='stty sane'                  # fix_stty:     Restore terminal set
 alias finda='alias | grep'                  # finda:        Find an alias by part of its name or command
 alias h='history'                           # h:            Show command history
 alias j='jobs -l'                           # j:            List background jobs
-mcd () { mkdir -p "$1" && cd "$1"; }        # mcd:          Makes new Dir and jumps inside
+mcd () { mkdir -p "$1" && cd "$1" || return; }        # mcd:          Makes new Dir and jumps inside
 
 #   select-folder:  Pick one of the folders here from a numbered list and cd into it
 #   ------------------------------------------------------------

@@ -100,10 +100,11 @@ path_add "$HOME/.pyenv/bin"
 command -v jenv >/dev/null 2>&1 && eval "$(jenv init -)"
 command -v pyenv >/dev/null 2>&1 && eval "$(pyenv init -)"
 command -v yarn >/dev/null 2>&1 && path_add "$(yarn global bin 2>/dev/null)"
-command -v copilot >/dev/null 2>&1 && export COPILOT_BIN="$(command -v copilot)"
+command -v copilot >/dev/null 2>&1 && COPILOT_BIN="$(command -v copilot)" && export COPILOT_BIN
 
 # z: jump to frequently used folders
 for z_script in /opt/homebrew/etc/profile.d/z.sh /usr/local/etc/profile.d/z.sh; do
+	# shellcheck source=/dev/null
 	[ -f "$z_script" ] && source "$z_script" && break
 done
 unset z_script
@@ -140,6 +141,7 @@ update-dotfiles () {
 		echo "Can't update: $DOTFILES isn't a git clone (downloaded as a ZIP?). Clone the repo and run its install.sh."
 		return 1
 	fi
+	# shellcheck source=/dev/null
 	git -C "$DOTFILES" pull && source "$HOME/.${DOTFILES_SHELL}rc"
 }
 alias get-updated-scripts='update-dotfiles'
@@ -181,6 +183,7 @@ dotfiles_welcome () {
 
 # OS-specific files load last so they can replace the general versions
 for dotfiles_file in "$DOTFILES"/shell/common/*.sh "$DOTFILES/shell/os/$DOTFILES_OS.sh"; do
+	# shellcheck source=/dev/null
 	[ -f "$dotfiles_file" ] && source "$dotfiles_file"
 done
 unset dotfiles_file

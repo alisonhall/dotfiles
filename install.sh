@@ -446,6 +446,7 @@ link_local_file() {
 	if [ -L "$home_file" ]; then
 		[ "$(readlink "$home_file")" = "$local_file" ] && return 0
 		if [ -e "$home_file" ] || [ ! -f "$local_file" ]; then
+			# shellcheck disable=SC2088  # ~ in a message, not a path
 			note "~/$2 links to $(readlink "$home_file"), not $local_file - leaving it as it is"
 			return 0
 		fi
@@ -462,6 +463,7 @@ link_local_file() {
 		elif cmp -s "$home_file" "$local_file"; then
 			backup "$home_file" --move >/dev/null
 		else
+			# shellcheck disable=SC2088  # ~ in a message, not a path
 			warning "~/$2 and $local_file are different files. ~/$2 is the one in use - merge what you need into $local_file, delete ~/$2, and re-run install.sh to link it"
 			return 0
 		fi
@@ -482,6 +484,7 @@ check_local_links() {
 		name="${entry%%:*}" path="${entry#*:}"
 		[ -f "$LOCAL_DIR/$name" ] || continue
 		if [ "$(readlink "$HOME/$path" 2>/dev/null || true)" != "$LOCAL_DIR/$name" ]; then
+			# shellcheck disable=SC2088  # ~ in a message, not a path
 			warning "~/$path doesn't link to $LOCAL_DIR/$name, so tools use $([ -e "$HOME/$path" ] && echo "~/$path instead" || echo "their defaults") - run ./install.sh"
 		fi
 	done
@@ -1585,8 +1588,10 @@ check_reminders() {
 			local missing
 			missing="$(blocklist_missing "$HOME/.dotfiles_blocklist" "$blocklist" | wc -l | tr -d ' ')"
 			if [ "$missing" -gt 0 ]; then
+				# shellcheck disable=SC2088  # ~ in a message, not a path
 				warning "~/.dotfiles_blocklist has $(entry_count "$missing") that $blocklist doesn't, so the pre-commit hook isn't checking them - run ./install.sh to add them"
 			else
+				# shellcheck disable=SC2088  # ~ in a message, not a path
 				note "~/.dotfiles_blocklist is left over - everything in it is in $blocklist, which the pre-commit hook reads. Run ./install.sh to move it to the backup folder"
 			fi
 			reminders_shown=1

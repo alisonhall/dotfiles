@@ -97,7 +97,7 @@ getFolderPath()
         * ) folderPath="$yn"; break;;
     esac
   done
-  cd "$folderPath"
+  cd "$folderPath" || exit
   echo "  folderPath=$folderPath"
   echo ""
 

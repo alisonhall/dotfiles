@@ -54,13 +54,13 @@ gstash-staged () {
 	git stash save "$1"
 
 	#Apply the original stash to get us back to where we started.
-	git stash apply stash@{1}
+	git stash apply 'stash@{1}'
 
 	#Create a temporary patch to reverse the originally staged changes and apply it
 	git stash show -p | git apply -R
 
 	#Delete the temporary stash
-	git stash drop stash@{1}
+	git stash drop 'stash@{1}'
 }
 gbranch-range () { git rev-list --simplify-by-decoration -2 "$@"; }    # enter the branch name
 gbranch-range-here () { git rev-list --simplify-by-decoration -2 HEAD; }
@@ -75,7 +75,10 @@ gcommits-on-branch-here () {
 	commit_range="$(gbranch-range-here)"
 	git log --oneline --decorate --graph "${commit_range//$'\n'/...}"
 }
+# gbranch-range prints two commits, one per line, so these split it on purpose
+# shellcheck disable=SC2046
 gdiff-on-branch () { git diff $(gbranch-range "$@"); }  # enter the branch name
+# shellcheck disable=SC2046
 gdiff-on-branch-here () { git diff $(gbranch-range-here); }
 alias gdiff-dev='git diff "$(git_dev_branch)"'
 
@@ -95,10 +98,10 @@ alias gmerge-no-commit='git merge --no-commit --no-ff'
 
 create-temp-worktree () {
 	git worktree add -b temporary-branch ../temporary-worktree "$(git_dev_branch)" &&
-		pushd ../temporary-worktree
+		pushd ../temporary-worktree || return
 }
 remove-temp-worktree () {
-	popd
+	popd || return
 	git worktree remove ../temporary-worktree
 }
 
