@@ -1,4 +1,4 @@
-# Shared by the wt tests (wt.bats, wt-tools.bats): each test gets a local "GitHub" repo, a clone of
+# Shared by the wt tests (wt*.bats, wt-tools.bats): each test gets a local "GitHub" repo, a clone of
 # it in the folder layout wt manages (repo/main), and a fake gh.
 
 wt_fixture_setup() {
@@ -71,7 +71,7 @@ wt_fixture_setup() {
 						[ "$pushable" = gone ] && owner=null name=null
 						# Through wt-add's own --jq, as the real gh would: on Windows jq is a Windows
 						# program too, so Git Bash changes the expression on its way, as it would for gh
-						command -v jq >/dev/null 2>&1 || { echo "wt.bats: the tests' gh needs jq, to run wt-add's --jq as gh would" >&2; exit 1; }
+						command -v jq >/dev/null 2>&1 || { echo "wt tests: the tests' gh needs jq, to run wt-add's --jq as gh would" >&2; exit 1; }
 						expression=""
 						while [ $# -gt 0 ]; do [ "$1" = --jq ] && expression="$2"; shift; done
 						printf '{"isCrossRepository":%s,"baseRefName":"%s","maintainerCanModify":%s,"headRepositoryOwner":%s,"headRepository":%s,"headRefName":"%s"}' \
@@ -156,5 +156,35 @@ fork_pr() {
 	git -C "$MAIN" push -q origin "HEAD:refs/pull/$1/head" 2>/dev/null
 	git -C "$MAIN" switch -q main
 	git -C "$MAIN" branch -q -D "fork-work-$1"
+	echo "$sha"
+}
+
+# pr_commit <number>: A new commit on pull request <number>'s head, as its author pushing more.
+# Prints the commit.
+pr_commit() {
+	local sha
+	git -C "$MAIN" switch -q --detach "$(git -C "$BATS_TEST_TMPDIR/origin.git" rev-parse "refs/pull/$1/head")" 2>/dev/null ||
+		{ git -C "$MAIN" fetch -q origin "refs/pull/$1/head" && git -C "$MAIN" switch -q --detach FETCH_HEAD; }
+	git -C "$MAIN" commit -q --allow-empty -m "more work on #$1"
+	sha="$(git -C "$MAIN" rev-parse HEAD)"
+	git -C "$MAIN" push -q origin "HEAD:refs/pull/$1/head" 2>/dev/null
+	git -C "$MAIN" switch -q main
+	echo "$sha"
+}
+
+# deleted_after_merge <branch> <number>: A branch that was pushed, merged as pull request
+# <number>, and then deleted, from GitHub and from the clone. Prints its last commit.
+deleted_after_merge() {
+	local sha
+	git -C "$MAIN" switch -q -c "$1"
+	git -C "$MAIN" commit -q --allow-empty -m "work on $1"
+	sha="$(git -C "$MAIN" rev-parse HEAD)"
+	git -C "$MAIN" push -q origin "$1" 2>/dev/null
+	# GitHub keeps every pull request's last commit at refs/pull/<number>/head
+	git -C "$BATS_TEST_TMPDIR/origin.git" update-ref "refs/pull/$2/head" "$sha"
+	git -C "$MAIN" push -q origin --delete "$1" 2>/dev/null
+	git -C "$MAIN" switch -q main
+	git -C "$MAIN" branch -q -D "$1"
+	git -C "$MAIN" fetch -q --prune
 	echo "$sha"
 }
