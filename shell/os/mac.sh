@@ -41,7 +41,7 @@ cdf () {
 EOT
 	)
 	echo "cd to \"$currFolderPath\""
-	cd "$currFolderPath"
+	cd "$currFolderPath" || return
 }
 
 #   spotlight: Search for a file using MacOS Spotlight's metadata

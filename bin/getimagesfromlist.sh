@@ -3,9 +3,7 @@
 # The spreadsheet URL comes from IMAGE_LIST_CSV_URL (set it in local/shell_local.sh)
 # chmod +x getimagesfromlist.sh
 
-hasDownloadImagesError="false"
 downloadImagesAttempt=0
-downloadToFolder="~/Downloads"
 
 
 checkForExistingImage()
@@ -38,8 +36,9 @@ getUndownloadedImagesFromUrls()
 {
   echo "getUndownloadedImagesFromUrls..."
 
-  while read p; do
-    filename=$(echo ${p##*/})
+  while IFS= read -r p; do
+    p=${p%$'\r'}  # drop a Windows line ending, if the CSV has them
+    filename=${p##*/}
     if [ -a "$filename" ]
     then
       echo "Already have $filename"
@@ -55,18 +54,17 @@ checkIfAllImagesDownloaded()
 {
   echo "checkIfAllImagesDownloaded..."
   NUMURLS=$(sort -u urls.txt | uniq -u | grep -io '.jpg\|.jpeg\|.png\|.gif\|.bmp' | wc -l)
+  # shellcheck disable=SC2010  # image names here have no newlines
   NUMIMAGES=$(ls | grep -Ei '\.jpg$|\.jpeg$|\.png$|\.gif$|\.bmp$' 2> /dev/null | wc -l)
 
-  if [ "$NUMURLS" -eq "$NUMIMAGES" -a "$NUMIMAGES" -gt 0 ]
+  if [ "$NUMURLS" -eq "$NUMIMAGES" ] && [ "$NUMIMAGES" -gt 0 ]
   then
     echo "Success!"
     echo "Number of URLs: $NUMURLS. Number of images downloaded: $NUMIMAGES"
-    hasDownloadImagesError="false"
     downloadImagesAttempt=0
     cleanUpAfterSuccess
   else
     echo "Something FAILED."
-    hasDownloadImagesError="true"
     echo "Number of URLs: $NUMURLS. Number of images downloaded: $NUMIMAGES"
     echo ""
     echo ""
@@ -89,18 +87,6 @@ cleanUpAfterSuccess()
   echo "Done!"
 }
 
-startRequest()
-{
-  echo "  url=$url"
-
-  cd "$downloadToFolder"
-  echo "  In folder:"
-  pwd
-  echo ""
-
-  checkForExistingImage
-}
-
 startScript()
 {
   echo "startScript..."
@@ -113,19 +99,6 @@ startScript()
   wget -q -O - "$IMAGE_LIST_CSV_URL" > urls.txt
 
   getImagesFromUrls
-
-	# while IFS="," read -r volume chapter baseUrl seriesName pageStart pageEnd createFolder remainder
-	# while IFS="," read -r url remainder
-	# do
-	# 	if [ "$hasDownloadImagesError" = "false" ]
-	# 	then
-  #     startRequest
-	# 	else
-	# 		echo "Errors:"
-	# 		echo "hasDownloadImagesError = $hasDownloadImagesError"
-	# 		exit
-	# 	fi
-	# done < "url.txt"
 }
 
 echo "Start of script..."

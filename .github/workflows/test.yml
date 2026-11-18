@@ -30,11 +30,11 @@ jobs:
       - name: Aliases are valid on every OS (with dash, Ubuntu's sh, for git aliases)
         run: bash tools/check-aliases.sh
 
-      - name: shellcheck (errors only)
+      - name: shellcheck (warnings and errors)
         # git-branch-status is a third-party script, kept as its authors wrote it
         run: |
           shellcheck --version
-          shellcheck -S error -s bash install.sh .githooks/pre-commit .githooks/commit-msg tools/*.sh \
+          shellcheck -S warning -s bash install.sh .githooks/pre-commit .githooks/commit-msg tools/*.sh \
             shell/bashrc.sh shell/common.sh shell/common/*.sh shell/os/*.sh \
             $(find bin -maxdepth 1 -type f ! -name git-branch-status) git/*.sh git/wt/*.sh
 

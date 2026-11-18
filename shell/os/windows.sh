@@ -37,6 +37,8 @@ alias openPorts='netstat -ano | grep LISTENING'     # openPorts:    All listenin
 alias lsof-local='netstat -ano | grep LISTENING'
 
 # Edit the hosts file in Notepad, as administrator (Windows will ask)
+# $env:SystemRoot is PowerShell's, inside single quotes
+# shellcheck disable=SC2154
 alias editHosts='powershell.exe -NoProfile -Command '\''Start-Process notepad -Verb RunAs -ArgumentList "$env:SystemRoot\System32\drivers\etc\hosts"'\'''
 alias edit-hosts-file='editHosts'
 
