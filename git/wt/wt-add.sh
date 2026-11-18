@@ -18,20 +18,28 @@ CURRENT_REMOTE_NAME="${CURRENT_REMOTE_NAME:-origin}"
 # repo's (as --strict would), or for a fork's, its pull ref (refs/pull/<number>/head) in a branch
 # and folder named pr-<number> tracking it, as gh pr checkout does. So a tool can check out any
 # PR with one command, and a fork's branch name is never taken for this repo's.
+#
+# --porcelain: for a tool - all the usual output goes to stderr, and stdout gets one line, the
+# worktree's full path (also when it already existed). Exit codes are the same.
 STRICT=0
+PORCELAIN=0
+ARGS=()
 REMOTE_BRANCH_NAME=""
 PR_NUMBER=""
 usage() {
-	echo "Usage: wt add [--strict] <branch-name>, or wt add --pr <number>" >&2
+	echo "Usage: wt add [--strict] [--porcelain] <branch-name>, or wt add --pr <number> [--porcelain]" >&2
 	echo "wt-add: ${1:-give one branch name, or --pr <number>.}" >&2
 	exit 2
 }
 while [ $# -gt 0 ]; do
+	[ "$1" = --porcelain ] || ARGS+=("$1")
 	case "$1" in
 		--strict) STRICT=1 ;;
+		--porcelain) PORCELAIN=1 ;;
 		--pr)
 			[ $# -ge 2 ] || usage "--pr takes a pull request's number."
 			PR_NUMBER="$2"
+			ARGS+=("$2")
 			shift
 			case "$PR_NUMBER" in
 				'' | *[!0-9]*)
@@ -55,6 +63,7 @@ if [ -n "$PR_NUMBER" ] && [ -n "$REMOTE_BRANCH_NAME" ]; then
 	exit 2
 fi
 [ -n "$REMOTE_BRANCH_NAME" ] || [ -n "$PR_NUMBER" ] || usage
+[ "$PORCELAIN" = 1 ] && run_porcelain "$0" "${ARGS[@]}"
 
 # refuse_new_branch <code> <why>: With --strict, stop here, having made nothing - exit 3 when the
 # branch isn't on the remote, 4 when that couldn't be found out (so a tool can tell a gone branch

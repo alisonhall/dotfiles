@@ -8,6 +8,15 @@
 source "$(cd "$(dirname "$0")" && pwd)/wt-common.sh"
 
 [ -n "${WT_WORKTREE_REPO_LOCATION:-}" ] || wt_not_configured wt-cd
+
+# --porcelain: for a tool - all the usual output goes to stderr, and stdout gets one line, the
+# folder's full path. (Taken out here, wherever it is, and the rest run again by run_porcelain.)
+PORCELAIN=0
+ARGS=()
+for arg in "$@"; do
+	if [ "$arg" = --porcelain ]; then PORCELAIN=1; else ARGS+=("$arg"); fi
+done
+[ "$PORCELAIN" = 1 ] && run_porcelain "$0" ${ARGS[@]+"${ARGS[@]}"}
 CURRENT_REMOTE_NAME="${CURRENT_REMOTE_NAME:-origin}"
 
 # --pr <number>: the pull request's folder, made first by wt add --pr if it isn't there (which

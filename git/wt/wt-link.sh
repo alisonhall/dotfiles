@@ -87,14 +87,20 @@ REPO_ROOT="$(cd "$REPO_ROOT" && pwd -P)"
 # Anchor for central git ops (see the check above).
 MAIN_WT="$REPO_ROOT/main"
 
-# in_layout <folder>: If <folder> is in a branch folder of this layout (beside main, not main),
-# prints that worktree's top folder and succeeds.
+# in_layout <folder>: If <folder> is in a branch folder of this layout (beside main, not main), or
+# in another worktree of the same repo made elsewhere, prints that worktree's top folder and
+# succeeds.
 in_layout() {
 	local top
 	top="$(git -C "$1" rev-parse --show-toplevel 2>/dev/null)" || return 1
-	[ -n "$top" ] && [ "$(dirname "$top")" -ef "$REPO_ROOT" ] && ! [ "$top" -ef "$MAIN_WT" ] || return 1
-	# As the layout names it (git may write it differently, like C:/... on Windows)
-	printf "%s" "$REPO_ROOT/$(basename "$top")"
+	[ -n "$top" ] && ! [ "$top" -ef "$MAIN_WT" ] || return 1
+	if [ "$(dirname "$top")" -ef "$REPO_ROOT" ]; then
+		# As the layout names it (git may write it differently, like C:/... on Windows)
+		printf "%s" "$REPO_ROOT/$(basename "$top")"
+		return 0
+	fi
+	same_repo "$top" "$MAIN_WT" || return 1
+	printf "%s" "$top"
 }
 
 # Without a branch, the worktree it's run in. Given a folder - written as a path (is_folder_arg),
@@ -116,7 +122,7 @@ elif [ -n "$BRANCH" ] && is_folder_arg "$BRANCH"; then
 		if [ "$(git -C "$BRANCH" rev-parse --show-toplevel 2>/dev/null)" -ef "$MAIN_WT" ]; then
 			echo "wt-link: $BRANCH is the main folder, which the links point at." >&2
 		else
-			echo "wt-link: $BRANCH isn't a branch's folder beside $MAIN_WT." >&2
+			echo "wt-link: $BRANCH isn't a branch's folder beside $MAIN_WT, or another worktree of its repo." >&2
 		fi
 		exit 1
 	fi

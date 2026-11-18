@@ -92,7 +92,7 @@ if [ "$_wt_sourced" = "1" ]; then
         # the command line the shell would act on characters like & or ; before wt saw them
         # An option wt doesn't know is left to the script to refuse, before asking for a branch
         # that would go unused. `wt add --pr <number>` (and cd) needs no branch: the script finds it.
-        local arg branch="" unknown="" pr="" wants_number=""
+        local arg branch="" unknown="" pr="" wants_number="" porcelain=""
         for arg in "$@"; do
           if [ -n "$wants_number" ]; then
             wants_number=""
@@ -102,6 +102,7 @@ if [ "$_wt_sourced" = "1" ]; then
             -*)
               case "$sub $arg" in
                 "add --strict") ;;
+                "add --porcelain" | "cd --porcelain") porcelain=1 ;;
                 "add --pr" | "cd --pr") pr=1; wants_number=1 ;;
                 *) unknown=1 ;;
               esac
@@ -134,6 +135,8 @@ if [ "$_wt_sourced" = "1" ]; then
         # On failure, the script's own exit code (like --strict's 3 and 4), for a tool that runs wt
         # in an interactive shell and so gets this function
         [ "$code" -eq 0 ] || return "$code"
+        # --porcelain: the caller wants the folder's path (printed by the script), not a moved shell
+        [ -n "$porcelain" ] && return 0
         if [ -n "$folder" ]; then
           cd "$folder"
         elif [ -n "$branch" ]; then
@@ -235,9 +238,23 @@ show_config() {
 	done
 }
 
-# Run in a folder of a layout (or, for wt link and rm, given one): that layout, whatever the settings
-# say, with the settings use_repo_settings (wt-common.sh) picks for it. Elsewhere, the layout
-# WT_WORKTREE_REPO_LOCATION names, its exported settings first.
+# repo_layout <folder>: For a worktree outside the layout but of a layout's repo - one git made at
+# ../feature/x for branch feature/x, say - prints that layout's folder and succeeds: the folder
+# holding the repo's main worktree (the first git lists), when that's a layout's main (in the
+# bare-repo layout, the first is .bare, beside main).
+repo_layout() {
+	local first
+	first="$(git -C "$1" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')"
+	[ -n "$first" ] || return 1
+	case "$first" in */.bare) first="$(dirname "$first")/main" ;; esac
+	[ "$(basename "$first")" = main ] && [ -d "$first" ] || return 1
+	_wt_layout_location "$first"
+}
+
+# Run in a folder of a layout (or, for wt link and rm, given one - else the one they're run in): that
+# layout, whatever the settings say. Run in (or given) another worktree of a layout's repo, that
+# repo's layout. Its settings are the ones use_repo_settings (wt-common.sh) picks. Elsewhere, the
+# layout WT_WORKTREE_REPO_LOCATION names, its exported settings first.
 layout_folder=""
 if [ "$sub" = link ] || [ "$sub" = rm ]; then
   for arg in "${@:2}"; do
@@ -247,7 +264,11 @@ if [ "$sub" = link ] || [ "$sub" = rm ]; then
 fi
 case "$sub" in
   add | cd | rm | ls | link | clean | config)
-    if location="$(_wt_layout_location "$layout_folder")"; then
+    # (A folder given that's outside any layout, like a worktree made elsewhere, is wt rm's and
+    # link's to check against the layout they're run in)
+    if location="$(_wt_layout_location "$layout_folder")" ||
+      location="$(repo_layout "${layout_folder:-$PWD}")" ||
+      { [ -n "$layout_folder" ] && location="$(_wt_layout_location)"; }; then
       use_repo_settings "$location/main" "$location"
       export WT_WORKTREE_REPO_LOCATION="$location"
       from_location="the layout it's run in"
@@ -282,7 +303,8 @@ Usage:
   wt <command> [args...]
 
 Commands:
-  add [--strict] <branch> Create a new worktree from a remote branch name,
+  add [--strict] [--porcelain] <branch>
+                          Create a new worktree from a remote branch name,
                           then cd into it. Recovers squash-merged branches via
                           their PR head when the remote branch is gone.
                             --strict   fail, making nothing, when the branch
@@ -304,6 +326,11 @@ Commands:
                           (from add --pr) fetches its pull request's head.
   cd --pr <number>        The same for a pull request: its folder, made by
                           add --pr if it isn't there yet.
+                          --porcelain (add and cd, with --strict and --pr
+                          too): for a tool - print only the worktree's full
+                          path on stdout (also when it already existed),
+                          everything else on stderr, and don't move the
+                          terminal. Exit codes are the same.
                           For add and cd, leave out <branch> to be asked for
                           it: paste a name with characters like & ; ( ) there,
                           or put it in single quotes on the command line.
@@ -311,7 +338,9 @@ Commands:
                           split at an & runs wt in the background, and wt
                           stops and says so, rather than using half a name.)
   rm <branch>|<folder>    Remove a worktree folder (a branch's, or one named
-                          like .) and prune stale worktree registrations.
+                          like . - beside main, or any other worktree of the
+                          repo, wherever it is) and prune stale worktree
+                          registrations.
                           Asks first if it has work that would be lost
                           (uncommitted changes, new files, commits not on
                           the remote); without a terminal, stops instead.

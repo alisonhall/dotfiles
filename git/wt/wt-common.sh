@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # wt-common.sh — shared helpers for the wt-*.sh scripts.
-# Sourced (not executed) by wt-add.sh, wt-cd.sh, wt-clean.sh, wt-link.sh, wt-ls.sh and wt-rm.sh.
+# Sourced (not executed) by wt.sh (when run, not when sourced), wt-add.sh, wt-cd.sh, wt-clean.sh,
+# wt-link.sh, wt-ls.sh and wt-rm.sh.
 #
 # These helpers read globals set by the calling script before they are invoked:
 #   WT_WORKTREE_REPO_LOCATION, MAIN_WT, CURRENT_REMOTE_NAME, REMOTE_BRANCH_NAME,
@@ -106,6 +107,20 @@ pull_ref_number() {
 	printf '%s' "$number"
 }
 
+# common_dir <folder>: The folder's repo's git folder (shared by all its worktrees), as a full path
+# (git gives it relative to the folder, unless absolute - C:/... from Windows' git too)
+common_dir() {
+	local dir
+	dir="$(git -C "$1" rev-parse --git-common-dir 2>/dev/null)" || return 1
+	case "$dir" in /* | [A-Za-z]:*) printf '%s' "$dir" ;; *) printf '%s/%s' "$1" "$dir" ;; esac
+}
+
+# same_repo <folder> <folder>: Whether both are worktrees of the same repo
+same_repo() {
+	local a b
+	a="$(common_dir "$1")" && b="$(common_dir "$2")" && [ "$a" -ef "$b" ]
+}
+
 # is_folder_arg <arg>: Whether a command's argument is a folder rather than a branch: written as a
 # path - ., .., ./x, ../x, a full path, or one with a drive letter - none of which can be a branch
 # name. A plain name is always a branch, even with a folder of that name where it's run (wt rm docs
@@ -121,6 +136,30 @@ is_folder_arg() {
 tell_folder() {
 	[ -n "${WT_CD_FILE:-}" ] || return 0
 	printf '%s\n' "$1" > "$WT_CD_FILE"
+}
+
+# run_porcelain <script> <args...>: For wt add/cd --porcelain: runs the script again with the args
+# (not --porcelain), all its output on stderr, and prints only the folder it used (as tell_folder
+# says) on stdout - one line, its full path - then exits with its exit code. (The second run keeps
+# anything it starts, like git's background maintenance after a fetch, from holding stdout open:
+# a tool reads it until every program holding it has closed it.)
+run_porcelain() {
+	local script="$1" file code=0 folder
+	shift
+	file="$(mktemp "${TMPDIR:-/tmp}/wt-porcelain.XXXXXX")" || exit 1
+	trap 'rm -f "$file"' EXIT
+	trap 'exit 130' INT
+	WT_CD_FILE="$file" bash "$script" "$@" >&2 || code=$?
+	folder="$(cat "$file" 2>/dev/null)"
+	[ "$code" -eq 0 ] || exit "$code"
+	if [ -z "$folder" ]; then
+		echo "error: $(basename "$script" .sh): it finished but didn't say which folder it used." >&2
+		exit 1
+	fi
+	# (The wt function asks for it too, though with --porcelain it doesn't move the terminal)
+	[ -n "${WT_CD_FILE:-}" ] && printf '%s\n' "$folder" > "$WT_CD_FILE"
+	printf '%s\n' "$folder"
+	exit 0
 }
 
 # Echo the number of a merged PR whose head was $REMOTE_BRANCH_NAME, or nothing

@@ -117,6 +117,12 @@ link_after_checkout() {
 	as_tool "$1" 'wt link'
 	[ "$status" -eq 0 ]
 	[ "$LOCATION/feature_a/node_modules" -ef "$MAIN/node_modules" ]
+	# The dashboard's worktree folder ../{branch} puts feature/b in a folder inside "feature"
+	git -C "$MAIN" worktree add -q -b feature/b "$LOCATION/feature/b"
+	cd "$LOCATION/feature/b"
+	as_tool "$1" 'wt link'
+	[ "$status" -eq 0 ]
+	[ "$LOCATION/feature/b/node_modules" -ef "$MAIN/node_modules" ]
 }
 @test "bash: wt link, run in a worktree git made, links it to main" {
 	link_after_checkout bash
@@ -250,4 +256,40 @@ no_branch() {
 		capture bash "$WT/wt.sh" $command
 		fails_with 2 "WT_WORKTREE_REPO_LOCATION is not set"
 	done
+}
+
+# --- worktrees git made elsewhere, and --porcelain -----------------------------------------------
+
+remove_elsewhere() {
+	mkdir -p "$BATS_TEST_TMPDIR/dashboard"
+	git -C "$MAIN" worktree add -q -b feature/d "$BATS_TEST_TMPDIR/dashboard/feature-d"
+	echo change >> "$BATS_TEST_TMPDIR/dashboard/feature-d/.gitignore"
+	export VIEW_PRS_WORKTREE="$BATS_TEST_TMPDIR/dashboard/feature-d"
+	as_tool "$1" 'wt rm --yes --branch "$VIEW_PRS_WORKTREE"'
+	[ "$status" -eq 0 ]
+	[ ! -e "$BATS_TEST_TMPDIR/dashboard/feature-d" ]
+	run git -C "$MAIN" show-ref --verify --quiet refs/heads/feature/d
+	[ "$status" -ne 0 ]
+}
+@test "bash: wt rm --yes --branch removes a worktree git made outside the layout" {
+	remove_elsewhere bash
+}
+@test "zsh: wt rm --yes --branch removes a worktree git made outside the layout" {
+	needs_shell zsh
+	remove_elsewhere zsh
+}
+
+add_porcelain() {
+	git -C "$MAIN" push -q origin main:refs/heads/feature/a 2>/dev/null
+	as_tool "$1" 'wt add feature/a --strict --porcelain'
+	[ "$status" -eq 0 ]
+	[ "$stdout" -ef "$LOCATION/feature_a" ]
+	[ "$(printf '%s\n' "$stdout" | wc -l | tr -d ' ')" -eq 1 ]
+}
+@test "bash: wt add --strict --porcelain prints only the folder" {
+	add_porcelain bash
+}
+@test "zsh: wt add --strict --porcelain prints only the folder" {
+	needs_shell zsh
+	add_porcelain zsh
 }
