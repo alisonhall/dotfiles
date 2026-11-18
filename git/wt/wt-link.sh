@@ -135,7 +135,6 @@ if [ "$ALL" -eq 1 ]; then
 	while IFS= read -r line; do
 		case "$line" in
 			worktree\ *) wt_path="${line#worktree }" ;;
-			branch\ *)   wt_branch="${line#branch refs/heads/}" ;;
 			bare)        wt_bare=1 ;;
 			"" )
 				# End of a record. Skip the bare repo and the main folder, whatever
@@ -144,7 +143,7 @@ if [ "$ALL" -eq 1 ]; then
 					&& [ "${wt_bare:-0}" -eq 0 ] && ! [ "$wt_path" -ef "$MAIN_WT" ]; then
 					targets+=("$wt_path")
 				fi
-				wt_path=""; wt_branch=""; wt_bare=0
+				wt_path=""; wt_bare=0
 				;;
 		esac
 	done < <(git -C "$MAIN_WT" worktree list --porcelain 2>/dev/null)
@@ -165,7 +164,7 @@ fi
 # not correct.
 process_worktree() {
 	local path="$1"
-	local rel main_rel expected p actual state
+	local rel main_rel expected p state
 	local ok=0 problem=0
 
 	echo "Worktree: $(basename "$path")"

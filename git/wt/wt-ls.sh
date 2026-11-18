@@ -215,24 +215,6 @@ remote_branch_exists() {
 
 # --- per-worktree helpers ----------------------------------------------------
 
-# Associated remote branch for a branch name. Prints one of:
-#   "<remote>/<branch>"            remote-tracking ref is present
-#   "<remote>/<branch> (pruned)"   upstream configured but the ref is gone
-#   "-"                            no upstream configured (never pushed)
-remote_for_branch() {
-	local branch="$1" remote
-	remote="$(git -C "$MAIN_WT" config "branch.${branch}.remote" 2>/dev/null || true)"
-	if [ -z "$remote" ]; then
-		echo "-"
-		return 0
-	fi
-	if git -C "$MAIN_WT" rev-parse --verify --quiet "refs/remotes/${remote}/${branch}" >/dev/null 2>&1; then
-		echo "${remote}/${branch}"
-	else
-		echo "${remote}/${branch} (pruned)"
-	fi
-}
-
 # Classify a worktree folder relative to the repo root:
 #   sibling - a direct child of the repo root (the normal, separate layout)
 #   nested  - under the repo root but not a direct child

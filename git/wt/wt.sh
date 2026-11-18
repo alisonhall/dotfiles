@@ -75,7 +75,7 @@ if [ "$_wt_sourced" = "1" ]; then
           echo "error: wt main: WT_WORKTREE_REPO_LOCATION is not set, and this isn't a folder of wt's layout. Run it in a branch's folder beside main, or export WT_WORKTREE_REPO_LOCATION (see wt help)." >&2
           return 2
         fi
-        cd "$location/main"
+        cd "$location/main" || return
         ;;
       add|cd)
         # In a subshell - e.g. in the background, because the shell split `wt cd fix-a&b` at the &
@@ -138,9 +138,9 @@ if [ "$_wt_sourced" = "1" ]; then
         # --porcelain: the caller wants the folder's path (printed by the script), not a moved shell
         [ -n "$porcelain" ] && return 0
         if [ -n "$folder" ]; then
-          cd "$folder"
+          cd "$folder" || return
         elif [ -n "$branch" ]; then
-          cd "$location/${branch//\//_}"
+          cd "$location/${branch//\//_}" || return
         fi
         ;;
       *)
@@ -207,7 +207,7 @@ source "$WT_DIR/wt-common.sh"
 
 # show_config: wt config - each setting wt would use here, and where it came from
 show_config() {
-	local entry var key kind value from ref remote="${CURRENT_REMOTE_NAME:-origin}" main
+	local entry var value from ref remote="${CURRENT_REMOTE_NAME:-origin}" main
 	if [ -z "${WT_WORKTREE_REPO_LOCATION:-}" ]; then
 		echo "error: wt config: WT_WORKTREE_REPO_LOCATION is not set, and this isn't a folder of wt's layout. Run it in the repo's main folder (or a branch's folder beside it), or export WT_WORKTREE_REPO_LOCATION as the folder that holds main." >&2
 		exit 2
@@ -215,7 +215,7 @@ show_config() {
 	main="$WT_WORKTREE_REPO_LOCATION/main"
 	printf '%-26s %s  (%s)\n' WT_WORKTREE_REPO_LOCATION "$WT_WORKTREE_REPO_LOCATION" "${from_location:-env}"
 	for entry in $WT_SETTINGS; do
-		IFS=: read -r var key kind <<< "$entry"
+		IFS=: read -r var _ _ <<< "$entry"
 		value="${!var:-}"
 		from="from_$var"
 		from="${!from:-}"

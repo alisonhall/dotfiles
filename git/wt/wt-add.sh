@@ -94,6 +94,13 @@ worktree_add_failed() {
 	exit 1
 }
 
+# cd_failed: Stop because the worktree was made but couldn't be entered, so the shared links weren't
+# set up in it (wt link sets them up)
+cd_failed() {
+	echo "error: wt-add: made the worktree at $worktree_path, but couldn't go into it, so its shared files aren't linked yet. Run wt link there." >&2
+	exit 1
+}
+
 # add_pull_ref: PR_NUMBER's pull ref in pr-<number>, a branch tracking it (as gh pr checkout sets up
 # a fork's PR, so git pull and wt ls follow the PR), checked out in a folder of that name with the
 # shared links. Exit 3 when the remote has no such pull ref, 4 when it can't be asked.
@@ -264,7 +271,7 @@ else
 		if pr_head_sha="$(fetch_pr_head "$pr_number")"; then
 			git -C "$MAIN_WT" worktree add --detach "$worktree_path" "$pr_head_sha" || worktree_add_failed "$REMOTE_BRANCH_NAME"
 			echo "Checked out PR #$pr_number head (${pr_head_sha:0:7}) in $LOCAL_BRANCH_NAME for review."
-			cd "$WT_WORKTREE_REPO_LOCATION/$LOCAL_BRANCH_NAME"
+			cd "$worktree_path" || cd_failed
 			tell_folder "$worktree_path"
 			setup_worktree_symlinks
 			exit 0
@@ -285,7 +292,7 @@ else
 fi
 
 [ -d "$worktree_path" ] || worktree_add_failed "$REMOTE_BRANCH_NAME"
-cd "$WT_WORKTREE_REPO_LOCATION/$LOCAL_BRANCH_NAME"
+cd "$worktree_path" || cd_failed
 echo "Worktree folder $LOCAL_BRANCH_NAME created and branch checked out."
 tell_folder "$worktree_path"
 setup_worktree_symlinks

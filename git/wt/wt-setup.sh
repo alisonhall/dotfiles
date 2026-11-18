@@ -140,6 +140,7 @@ quiet_git() {
 # (C:\Users\...) get forward slashes, which Git Bash and Windows programs both accept.
 full_path() {
 	local path="${1//\\//}"
+	# shellcheck disable=SC2088  # a literal ~/ typed in an answer
 	case "$path" in
 		"~") path="$HOME" ;;
 		"~/"*) path="$HOME/${path#\~/}" ;;
@@ -154,6 +155,7 @@ full_path() {
 
 # pretty_path <path>: The path with $HOME shown as ~, for messages
 pretty_path() {
+	# shellcheck disable=SC2088  # a ~ to show, not to expand
 	case "$1" in
 		"$HOME") printf '~' ;;
 		"$HOME"/*) printf '~/%s' "${1#"$HOME"/}" ;;
@@ -280,6 +282,7 @@ loads_wt() {
 	while IFS= read -r entry; do
 		path="$(printf '%s\n' "${entry#*:}" | sed -nE "s/^[[:space:]]*(\.|source)[[:space:]]+[\"']?([^\"' ;]*wt\.sh)[\"']?([[:space:];].*)?$/\2/p")"
 		[ -n "$path" ] || continue
+		# shellcheck disable=SC2088  # a literal ~/ typed in an answer
 		case "$path" in
 			"~/"*) path="$HOME/${path#\~/}" ;;
 			'$HOME/'*) path="$HOME/${path#\$HOME/}" ;;
@@ -375,6 +378,7 @@ while :; do
 	SLUG=""
 	CLONE_URL=""
 	ask_required repo "Which repo? Its GitHub owner/name (like octocat/hello-world), or a URL to clone" "$default_repo"
+	# shellcheck disable=SC2154  # repo is set by ask (printf -v)
 	if [[ "$repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] && [ ! -e "$repo" ]; then
 		SLUG="$repo"
 	else
@@ -421,6 +425,7 @@ if [ "$in_this_repo" = 1 ]; then
 	fi
 fi
 ask_required location "Folder for the repo" "$(pretty_path "$default_location")"
+# shellcheck disable=SC2154  # location is set by ask (printf -v)
 LOCATION="$(full_path "$location")"
 MAIN="$LOCATION/main"
 
@@ -441,6 +446,7 @@ else
 	choose how "How should the clone get into $(pretty_path "$MAIN")?" \
 		"Clone the repo from $(clone_source)" \
 		"Move a clone I already have"
+	# shellcheck disable=SC2154  # how is set by choose (printf -v)
 	if [ "$how" = 1 ]; then
 		[ "$REACHABLE" = 1 ] || die "the repo couldn't be reached, so it can't be cloned. Nothing was changed."
 		MODE=clone
@@ -448,6 +454,7 @@ else
 		MODE=move
 		while :; do
 			ask_required from "Where is the clone?" "$(pretty_path "${current_root:-}")"
+			# shellcheck disable=SC2154  # from is set by ask (printf -v)
 			MOVE_FROM="$(full_path "$from")"
 			if ! is_clone "$MOVE_FROM"; then
 				say "  $(pretty_path "$MOVE_FROM") isn't the top folder of a clone."
@@ -506,6 +513,7 @@ else
 fi
 [ "$IN_DOTFILES" = 1 ] && say "These dotfiles load wt already, so the command goes in local/shell_local.sh."
 ask_required startup "Startup file that loads wt (and holds a command for this repo, if you want one)" "$(pretty_path "$default_file")"
+# shellcheck disable=SC2154  # startup is set by ask (printf -v)
 STARTUP_FILE="$(full_path "$startup")"
 
 default_command="$(printf '%s' "$REPO_NAME-wt" | tr -c 'A-Za-z0-9_\n-' '-')"
@@ -767,7 +775,8 @@ esac
 
 # backup <file>: Copy the file aside before changing it
 backup() {
-	local copy="$1.wt-setup-$(date +%Y%m%d-%H%M%S).bak"
+	local copy
+	copy="$1.wt-setup-$(date +%Y%m%d-%H%M%S).bak"
 	[ -f "$1" ] || return 0
 	cp "$1" "$copy" || die "couldn't back up $(pretty_path "$1"), so it wasn't changed."
 	say "Backed up $(pretty_path "$1") to $(pretty_path "$copy")"
