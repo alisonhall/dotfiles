@@ -67,6 +67,7 @@ fi
 # worktree in both layouts, whereas the collection folder is not a git repo in
 # the normal-repo-at-main layout. (The other git calls in this script run from
 # the feature worktree after `cd "$worktree_path"`, so they need no anchor.)
+# shellcheck disable=SC2034  # read by wt-common.sh's functions
 MAIN_WT="$WT_WORKTREE_REPO_LOCATION/main"
 
 worktree_path="$WT_WORKTREE_REPO_LOCATION/$LOCAL_BRANCH_NAME"

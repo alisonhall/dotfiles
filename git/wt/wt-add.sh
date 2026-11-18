@@ -264,7 +264,7 @@ else
 		if pr_head_sha="$(fetch_pr_head "$pr_number")"; then
 			git -C "$MAIN_WT" worktree add --detach "$worktree_path" "$pr_head_sha" || worktree_add_failed "$REMOTE_BRANCH_NAME"
 			echo "Checked out PR #$pr_number head (${pr_head_sha:0:7}) in $LOCAL_BRANCH_NAME for review."
-			cd "$WT_WORKTREE_REPO_LOCATION/$LOCAL_BRANCH_NAME"
+			cd "$WT_WORKTREE_REPO_LOCATION/$LOCAL_BRANCH_NAME" || worktree_add_failed "$REMOTE_BRANCH_NAME"
 			tell_folder "$worktree_path"
 			setup_worktree_symlinks
 			exit 0
@@ -285,7 +285,7 @@ else
 fi
 
 [ -d "$worktree_path" ] || worktree_add_failed "$REMOTE_BRANCH_NAME"
-cd "$WT_WORKTREE_REPO_LOCATION/$LOCAL_BRANCH_NAME"
+cd "$WT_WORKTREE_REPO_LOCATION/$LOCAL_BRANCH_NAME" || worktree_add_failed "$REMOTE_BRANCH_NAME"
 echo "Worktree folder $LOCAL_BRANCH_NAME created and branch checked out."
 tell_folder "$worktree_path"
 setup_worktree_symlinks

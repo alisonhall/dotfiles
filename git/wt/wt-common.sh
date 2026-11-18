@@ -342,9 +342,7 @@ link_workspaces() {
 # agnostic — no project paths are hardcoded here.
 worktree_symlink_pairs() {
 	local rel
-	for rel in node_modules; do
-		printf '%s\tmain/%s\n' "$rel" "$rel"
-	done
+	printf 'node_modules\tmain/node_modules\n'
 	if [ -n "${WT_SYMLINK_PAIRS:-}" ]; then
 		for rel in $WT_SYMLINK_PAIRS; do
 			printf '%s\tmain/%s\n' "$rel" "$rel"

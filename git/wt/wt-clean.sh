@@ -153,7 +153,8 @@ REMOTE_NAME="${CURRENT_REMOTE_NAME:-origin}"
 # branches start from (resolve_dev_branch: CURRENT_DEV_BRANCH, wt.devBranch, the remote's default
 # branch, or main) is always protected too. (The main folder itself is
 # skipped by path, whatever branch it holds.)
-PROTECTED=(${WT_PROTECTED_BRANCHES:-main})
+# (read -a splits on spaces without expanding a * or ? in a name)
+read -ra PROTECTED <<< "${WT_PROTECTED_BRANCHES:-main}"
 CURRENT_REMOTE_NAME="$REMOTE_NAME"
 resolve_dev_branch
 PROTECTED+=("$CURRENT_DEV_BRANCH")
@@ -167,7 +168,11 @@ PROTECTED+=("$CURRENT_DEV_BRANCH")
 # that does should list it in WT_SAFE_ARTIFACTS.
 SAFE_ARTIFACTS=(node_modules .yarn .DS_Store dist build coverage .next .nuxt out .turbo .parcel-cache .vite .pytest_cache __pycache__ .eslintcache)
 if [[ -n "${WT_SAFE_ARTIFACTS:-}" ]]; then
-  SAFE_ARTIFACTS+=(${WT_SAFE_ARTIFACTS})
+  read -ra extra_artifacts <<< "$WT_SAFE_ARTIFACTS"
+  # (bash 3.2 with set -u calls an empty array unset)
+  if [ "${#extra_artifacts[@]}" -gt 0 ]; then
+    SAFE_ARTIFACTS+=("${extra_artifacts[@]}")
+  fi
 fi
 
 # --- sanity checks -----------------------------------------------------------
