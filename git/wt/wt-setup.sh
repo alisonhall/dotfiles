@@ -5,12 +5,15 @@
 # It asks which GitHub repo to use and where to keep its worktrees, then:
 #   * gets the repo into the layout wt expects, <repo-location>/main, by cloning
 #     it or by moving a clone you already have
-#   * adds a command for the repo to your shell's startup file, which runs wt
-#     with that repo's settings:
+#   * saves the repo's settings in the clone's git config (wt.repoSlug,
+#     wt.devBranch, wt.symlinkPair, ...), where plain wt finds them when it's
+#     run in the repo's folders. (Settings from an earlier run's command move
+#     there too.)
+#   * optionally, adds a command for the repo to your shell's startup file, to
+#     run wt for it from any folder:
 #
 #       <command-name>() {
 #           WT_WORKTREE_REPO_LOCATION="<repo-location>" \
-#           WT_REPO_SLUG="<repo-owner>/<repo-name>" \
 #           wt "$@"
 #       }
 #
@@ -502,13 +505,19 @@ else
 	esac
 fi
 [ "$IN_DOTFILES" = 1 ] && say "These dotfiles load wt already, so the command goes in local/shell_local.sh."
-ask_required startup "Startup file to add the command to" "$(pretty_path "$default_file")"
+ask_required startup "Startup file that loads wt (and holds a command for this repo, if you want one)" "$(pretty_path "$default_file")"
 STARTUP_FILE="$(full_path "$startup")"
 
 default_command="$(printf '%s' "$REPO_NAME-wt" | tr -c 'A-Za-z0-9_\n-' '-')"
+say "In the repo's folders, plain wt works. A command for the repo also runs wt for it from"
+say "any other folder."
 while :; do
-	ask_required COMMAND_NAME "Name for this repo's wt command" "$default_command"
+	ask_required COMMAND_NAME "Name for that command (- for none)" "$default_command"
 	case "$COMMAND_NAME" in
+		-)
+			COMMAND_NAME=""
+			break
+			;;
 		[!A-Za-z_]* | *[!A-Za-z0-9_-]*)
 			say "  Use letters, numbers, - and _, starting with a letter or _."
 			continue
@@ -534,8 +543,35 @@ while :; do
 	break
 done
 
+# Settings from before: the clone's git config, or else the command an earlier run added (whose
+# settings move to git config, leaving the command just the folder)
+config_dir=""
+[ "$MODE" != clone ] && config_dir="$clone_dir"
+# old_setting <variable>: Its value in the earlier run's command for COMMAND_NAME, if any
+old_setting() {
+	[ -n "$COMMAND_NAME" ] && has_block "$STARTUP_FILE" "$COMMAND_NAME" || return 0
+	START="# >>> wt: $COMMAND_NAME >>>" END="# <<< wt: $COMMAND_NAME <<<" VAR="$1" awk '
+		{ line = $0; sub(/\r$/, "", line) }
+		line == ENVIRON["START"] { inside = 1; next }
+		line == ENVIRON["END"] { inside = 0 }
+		inside && match(line, "^[ \t]*" ENVIRON["VAR"] "=\"") {
+			value = substr(line, RLENGTH + 1); sub(/" \\$/, "", value); print value; exit
+		}' "$STARTUP_FILE"
+}
+# config_setting <key>: Its value(s) in the clone's git config, joined with spaces
+config_setting() {
+	[ -n "$config_dir" ] || return 0
+	git -C "$config_dir" config --get-all "wt.$1" 2>/dev/null | tr '\n' ' ' | sed 's/ $//'
+}
+old_dev_branch="$(config_setting devBranch)"
+[ -n "$old_dev_branch" ] || old_dev_branch="$(old_setting CURRENT_DEV_BRANCH)"
+old_shared="$(config_setting symlinkPair)"
+[ -n "$old_shared" ] || old_shared="$(old_setting WT_SYMLINK_PAIRS)"
+MIGRATING=0
+[ -n "$(old_setting WT_REPO_SLUG)$(old_setting CURRENT_DEV_BRANCH)$(old_setting WT_SYMLINK_PAIRS)$(old_setting CURRENT_REMOTE_NAME)" ] && MIGRATING=1
+
 while :; do
-	ask_required DEV_BRANCH "Branch that new branches start from" "${detected_branch:-main}"
+	ask_required DEV_BRANCH "Branch that new branches start from" "${old_dev_branch:-${detected_branch:-main}}"
 	branch_exists "$DEV_BRANCH" && break
 	say "  The repo has no branch called $DEV_BRANCH."
 	ask_yes_no "Use it anyway?" n && break
@@ -549,7 +585,7 @@ if [ "$MODE" != clone ]; then
 fi
 say "Files or folders that every branch folder should share with main, rather than have"
 say "its own copy of (like .env). node_modules is always shared. Type - for none."
-ask SHARED "Shared files, separated by spaces" "${suggest_shared:--}"
+ask SHARED "Shared files, separated by spaces" "${old_shared:-${suggest_shared:--}}"
 [ "$SHARED" = - ] && SHARED=""
 
 # Windows limits paths to 260 characters unless git is told otherwise, and node_modules inside a
@@ -567,15 +603,56 @@ fi
 #   PLAN
 #   -------------------------------
 
-command_block="# Added by wt-setup.sh. Running it again for $COMMAND_NAME replaces this whole block."$'\n'"$COMMAND_NAME() {"$'\n'
-command_block+="	WT_WORKTREE_REPO_LOCATION=$(quoted "$LOCATION") \\"$'\n'
-[ -n "$SLUG" ] && command_block+="	WT_REPO_SLUG=$(quoted "$SLUG") \\"$'\n'
-[ "$REMOTE" != origin ] && command_block+="	CURRENT_REMOTE_NAME=$(quoted "$REMOTE") \\"$'\n'
-if [ "$DEV_BRANCH" != main ]; then
-	command_block+="	CURRENT_DEV_BRANCH=$(quoted "$DEV_BRANCH") \\"$'\n'
+# The repo's settings, in the clone's git config: "<key> <value>" to set, "-<key>" to remove, one
+# per line. A setting that's the same as what wt works out by itself is left out: the dev branch
+# when it's the remote's default branch, the remote when it's origin.
+config_lines=""
+[ -n "$SLUG" ] && config_lines+="repoSlug $SLUG"$'\n'
+if [ "$REMOTE" != origin ]; then config_lines+="remote $REMOTE"$'\n'; else config_lines+="-remote"$'\n'; fi
+if [ "$DEV_BRANCH" != "${detected_branch:-main}" ]; then
+	config_lines+="devBranch $DEV_BRANCH"$'\n'
+else
+	config_lines+="-devBranch"$'\n'
 fi
-[ -n "$SHARED" ] && command_block+="	WT_SYMLINK_PAIRS=$(quoted "$SHARED") \\"$'\n'
-command_block+='	wt "$@"'$'\n''}'
+config_lines+="-symlinkPair"$'\n'
+for name in $SHARED; do
+	config_lines+="+symlinkPair $name"$'\n'
+done
+
+# config_commands: The git config commands for config_lines, as they'd be typed in main
+config_commands() {
+	local line
+	while IFS= read -r line; do
+		case "$line" in
+			"") ;;
+			-*) [ -n "$(config_setting "${line#-}")" ] && printf 'git config --unset-all wt.%s\n' "${line#-}" ;;
+			+*) printf 'git config --add wt.%s\n' "${line#+}" ;;
+			*) printf 'git config wt.%s\n' "$line" ;;
+		esac
+	done <<< "$config_lines"
+}
+
+# write_config: Runs them, in the clone in main
+write_config() {
+	local line key
+	while IFS= read -r line; do
+		case "$line" in
+			"") ;;
+			-*) git -C "$MAIN" config --unset-all "wt.${line#-}" 2>/dev/null || [ $? = 5 ] ;;
+			+*) key="${line#+}"; git -C "$MAIN" config --add "wt.${key%% *}" "${key#* }" ;;
+			*) git -C "$MAIN" config "wt.${line%% *}" "${line#* }" ;;
+		esac || return 1
+	done <<< "$config_lines"
+}
+
+command_block=""
+if [ -n "$COMMAND_NAME" ]; then
+	command_block="# Added by wt-setup.sh. Running it again for $COMMAND_NAME replaces this whole block."$'\n'
+	command_block+="# The repo's settings are in its git config: see wt config, run in the repo's folder."$'\n'
+	command_block+="$COMMAND_NAME() {"$'\n'
+	command_block+="	WT_WORKTREE_REPO_LOCATION=$(quoted "$LOCATION") \\"$'\n'
+	command_block+='	wt "$@"'$'\n''}'
+fi
 
 # Load wt, unless the dotfiles do it or the file already does
 load_block=""
@@ -612,14 +689,25 @@ case "$MODE" in
 	move) step "Move $(pretty_path "$MOVE_FROM") to $(pretty_path "$MAIN")" ;;
 	existing) step "Use the clone that's already in $(pretty_path "$MAIN")" ;;
 esac
-if has_block "$STARTUP_FILE" "$COMMAND_NAME"; then
-	step "Replace the $COMMAND_NAME command in $(pretty_path "$STARTUP_FILE") with:"
-else
-	step "Add this to $(pretty_path "$STARTUP_FILE"):"
+config_plan="$(config_commands)"
+if [ -n "$config_plan" ]; then
+	if [ "$MIGRATING" = 1 ]; then
+		step "Save the repo's settings in its git config (moving them out of the $COMMAND_NAME command), in $(pretty_path "$MAIN"):"
+	else
+		step "Save the repo's settings in its git config, in $(pretty_path "$MAIN"):"
+	fi
+	printf '%s\n' "$config_plan" | sed 's/^/     /'
 fi
-[ -n "$load_block" ] && printf '%s\n' "$load_block" | sed 's/^/     /'
-printf '%s\n' "$command_block" | sed 's/^/     /'
-[ -f "$STARTUP_FILE" ] && say "   (backing it up first)"
+if [ -n "$command_block" ] || [ -n "$load_block" ]; then
+	if [ -n "$COMMAND_NAME" ] && has_block "$STARTUP_FILE" "$COMMAND_NAME"; then
+		step "Replace the $COMMAND_NAME command in $(pretty_path "$STARTUP_FILE") with:"
+	else
+		step "Add this to $(pretty_path "$STARTUP_FILE"):"
+	fi
+	[ -n "$load_block" ] && printf '%s\n' "$load_block" | sed 's/^/     /'
+	[ -n "$command_block" ] && printf '%s\n' "$command_block" | sed 's/^/     /'
+	[ -f "$STARTUP_FILE" ] && say "   (backing it up first)"
+fi
 if [ -n "$login_block" ]; then
 	step "Add this to $(pretty_path "$LOGIN_FILE"), so new terminals (login shells) load ~/.bashrc:"
 	printf '%s\n' "$login_block" | sed 's/^/     /'
@@ -685,10 +773,16 @@ backup() {
 	say "Backed up $(pretty_path "$1") to $(pretty_path "$copy")"
 }
 
-mkdir -p "$(dirname "$STARTUP_FILE")"
-backup "$STARTUP_FILE"
+if [ -n "$config_plan" ]; then
+	write_config || die "couldn't save the settings in $(pretty_path "$MAIN")'s git config. $(pretty_path "$STARTUP_FILE") wasn't changed."
+	say "Saved the repo's settings in its git config (see them with: wt config, in $(pretty_path "$MAIN"))"
+fi
+if [ -n "$command_block" ] || [ -n "$load_block" ]; then
+	mkdir -p "$(dirname "$STARTUP_FILE")"
+	backup "$STARTUP_FILE"
+fi
 [ -n "$load_block" ] && { set_block "$STARTUP_FILE" load "$load_block" || die "couldn't update $(pretty_path "$STARTUP_FILE")."; }
-set_block "$STARTUP_FILE" "$COMMAND_NAME" "$command_block" || die "couldn't update $(pretty_path "$STARTUP_FILE")."
+[ -n "$command_block" ] && { set_block "$STARTUP_FILE" "$COMMAND_NAME" "$command_block" || die "couldn't update $(pretty_path "$STARTUP_FILE")."; }
 if [ -n "$login_block" ]; then
 	backup "$LOGIN_FILE"
 	set_block "$LOGIN_FILE" load-bashrc "$login_block" || die "couldn't update $(pretty_path "$LOGIN_FILE")."
@@ -698,14 +792,20 @@ if [ "$LONG_PATHS" = 1 ]; then
 	git config --global core.longpaths true || die "couldn't turn on core.longpaths in git."
 	say "Let git use long paths"
 fi
-say "Added the $COMMAND_NAME command to $(pretty_path "$STARTUP_FILE")"
+[ -n "$COMMAND_NAME" ] && say "Added the $COMMAND_NAME command to $(pretty_path "$STARTUP_FILE")"
 
 heading "Done"
-say "Open a new terminal (or run: . $(pretty_path "$STARTUP_FILE")), then try:"
-printf '  %-*s  %s\n' $((${#COMMAND_NAME} + 13)) "$COMMAND_NAME ls" "list the repo's branch folders" \
-	$((${#COMMAND_NAME} + 13)) "$COMMAND_NAME add <branch>" "make a folder for a branch and go to it" \
-	$((${#COMMAND_NAME} + 13)) "$COMMAND_NAME help" "everything else"
+run_as="${COMMAND_NAME:-wt}"
+if [ -n "$COMMAND_NAME" ]; then
+	say "Open a new terminal (or run: . $(pretty_path "$STARTUP_FILE")), then try (from any folder, or"
+	say "with plain wt in $(pretty_path "$MAIN")):"
+else
+	say "Open a new terminal (or run: . $(pretty_path "$STARTUP_FILE")), cd $(quoted "$MAIN"), then try:"
+fi
+printf '  %-*s  %s\n' $((${#run_as} + 13)) "$run_as ls" "list the repo's branch folders" \
+	$((${#run_as} + 13)) "$run_as add <branch>" "make a folder for a branch and go to it" \
+	$((${#run_as} + 13)) "$run_as help" "everything else"
 if [ "$IN_MOVED_CLONE" = 1 ]; then
 	say "This terminal is still in the clone's old folder. Run: cd $(quoted "$MAIN")"
 fi
-[ "$GH_READY" = 1 ] || say "Install the GitHub CLI and run gh auth login before using $COMMAND_NAME clean."
+[ "$GH_READY" = 1 ] || say "Install the GitHub CLI and run gh auth login before using $run_as clean."

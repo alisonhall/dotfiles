@@ -56,10 +56,10 @@ if [ -z "${WT_WORKTREE_REPO_LOCATION:-}" ]; then
 	fi
 	wt_not_configured wt-rm
 fi
-CURRENT_DEV_BRANCH="${CURRENT_DEV_BRANCH:-main}"
 CURRENT_REMOTE_NAME="${CURRENT_REMOTE_NAME:-origin}"
 
 MAIN_WT="$WT_WORKTREE_REPO_LOCATION/main"
+resolve_dev_branch
 
 # Given a folder - written as a path (is_folder_arg), which is never a branch name - that branch
 # folder: the folder itself, not one inside it, as deleting goes further than what was named.

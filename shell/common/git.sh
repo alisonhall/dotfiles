@@ -103,12 +103,12 @@ remove-temp-worktree () {
 }
 
 # wt: git worktree manager (git/wt/) for a collection of worktrees checked out
-# side by side. Project/user-agnostic - it reads WT_* env vars instead of
-# hardcoding anything. There are no shared WT_* defaults here: each repo you
-# manage worktrees for gets its own alias in local/shell_local.sh that passes its
-# WT_* values to the `wt` function, e.g.:
-#   alias my-repo-wt="WT_WORKTREE_REPO_LOCATION=\$HOME/Sites/my-repo-worktrees WT_REPO_SLUG=owner/repo wt"
-# `wt help` lists every command and all the WT_* variables.
+# side by side. Project/user-agnostic: run in a repo's folders, it reads that
+# repo's settings from the clone's git config (wt.repoSlug, wt.symlinkPair, ...;
+# `wt setup` writes them). An alias in local/shell_local.sh is only needed to run
+# it for a repo from other folders, e.g.:
+#   alias my-repo-wt="WT_WORKTREE_REPO_LOCATION=\$HOME/Sites/my-repo-worktrees wt"
+# `wt help` lists every command and setting; `wt config` shows the ones in use.
 WT_DIR="$DOTFILES/git/wt"
 [ -f "$WT_DIR/wt.sh" ] && . "$WT_DIR/wt.sh"
 

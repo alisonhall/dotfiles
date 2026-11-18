@@ -57,7 +57,7 @@ loads_cleanly() {
 #   SETTING UP
 #   -------------------------------
 
-@test "clones the repo into <folder>/main and adds a command to ~/.bashrc" {
+@test "clones the repo into <folder>/main, saves its settings in git config, and adds a command to ~/.bashrc" {
 	fresh_clone
 	[ "$status" -eq 0 ]
 	[ -d "$HOME/code/shop/main/.git" ]
@@ -65,10 +65,12 @@ loads_cleanly() {
 	grep -qF "/wt/wt.sh\"" "$HOME/.bashrc"
 	grep -qxF 'shop-wt() {' "$HOME/.bashrc"
 	grep -qF 'WT_WORKTREE_REPO_LOCATION="$HOME/code/shop" \' "$HOME/.bashrc"
-	grep -qF 'WT_REPO_SLUG="acme/shop" \' "$HOME/.bashrc"
-	grep -qF 'CURRENT_DEV_BRANCH="develop" \' "$HOME/.bashrc"
-	# (wt clean protects CURRENT_DEV_BRANCH itself, so it isn't repeated in WT_PROTECTED_BRANCHES)
-	[ "$(grep -c WT_PROTECTED_BRANCHES "$HOME/.bashrc")" -eq 0 ]
+	# The settings are in the clone's git config, not the command
+	[ "$(git -C "$HOME/code/shop/main" config wt.repoSlug)" = acme/shop ]
+	[ "$(grep -c 'WT_REPO_SLUG\|CURRENT_DEV_BRANCH\|WT_SYMLINK_PAIRS' "$HOME/.bashrc")" -eq 0 ]
+	# develop is the repo's default branch (origin/HEAD), which wt finds itself, so it isn't saved
+	run git -C "$HOME/code/shop/main" config wt.devBranch
+	[ "$status" -ne 0 ]
 	loads_cleanly "$HOME/.bashrc"
 	# On Linux, terminals read ~/.bashrc themselves
 	[ ! -e "$HOME/.bash_profile" ]
@@ -90,7 +92,7 @@ loads_cleanly() {
 	[[ "$output" == *"already a clone, so wt will use it as it is"* ]] || false
 	[ "$(grep -cxF '# >>> wt: shop-wt >>>' "$HOME/.bashrc")" -eq 1 ]
 	[ "$(grep -cxF '# >>> wt: load >>>' "$HOME/.bashrc")" -eq 1 ]
-	grep -qF 'WT_SYMLINK_PAIRS=".env" \' "$HOME/.bashrc"
+	[ "$(git -C "$HOME/code/shop/main" config --get-all wt.symlinkPair)" = .env ]
 	ls "$HOME"/.bashrc.wt-setup-*.bak
 }
 
@@ -263,7 +265,62 @@ loads_cleanly() {
 	setup_with "$REMOTE" acme/shop "" 1 "" "" devlop n "" "" y
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"The repo has no branch called devlop"* ]] || false
-	grep -qF 'CURRENT_DEV_BRANCH="develop" \' "$HOME/.bashrc"
+	run git -C "$HOME/code/shop/main" config wt.devBranch
+	[ "$status" -ne 0 ]
+}
+
+@test "saves a start branch that isn't the repo's default branch, and several shared files" {
+	git -C "$BATS_TEST_TMPDIR/seed" push -q origin develop:release 2>/dev/null
+	# ...command name, start branch, shared, go ahead
+	setup_with "$REMOTE" acme/shop "" 1 "" "" release ".env .cache" y
+	[ "$status" -eq 0 ]
+	[ "$(git -C "$HOME/code/shop/main" config wt.devBranch)" = release ]
+	[ "$(git -C "$HOME/code/shop/main" config --get-all wt.symlinkPair | tr '\n' ' ')" = ".env .cache " ]
+	cd "$HOME/code/shop/main"
+	run bash "$(dirname "$SCRIPT")/wt.sh" config
+	[[ "$output" == *"CURRENT_DEV_BRANCH"*"release"*"(git config wt.devBranch)"* ]] || false
+	[[ "$output" == *"WT_SYMLINK_PAIRS"*".env .cache"* ]] || false
+}
+
+@test "with - for the command name, adds no command, but still saves the settings and loads wt" {
+	setup_with "$REMOTE" acme/shop "" 1 "" - "" ".env" y
+	[ "$status" -eq 0 ]
+	[[ "$output" != *"shop-wt ls"* ]] && [[ "$output" != *"Added the shop-wt command"* ]] || false
+	[[ "$output" == *"cd \"\$HOME/code/shop/main\", then try:"* ]] || false
+	[ "$(git -C "$HOME/code/shop/main" config wt.repoSlug)" = acme/shop ]
+	[ "$(git -C "$HOME/code/shop/main" config wt.symlinkPair)" = .env ]
+	grep -qF "/wt/wt.sh\"" "$HOME/.bashrc"
+	[ "$(grep -c 'shop-wt\|WT_WORKTREE_REPO_LOCATION' "$HOME/.bashrc")" -eq 0 ]
+	loads_cleanly "$HOME/.bashrc"
+}
+
+@test "moves the settings in a command from an earlier run into git config" {
+	git -C "$BATS_TEST_TMPDIR/seed" push -q origin develop:release 2>/dev/null
+	fresh_clone
+	# The command an earlier version of wt setup wrote, with the settings in it
+	cat > "$HOME/.bashrc" <<-'EOF2'
+		# >>> wt: shop-wt >>>
+		# Added by wt-setup.sh. Running it again for shop-wt replaces this whole block.
+		shop-wt() {
+			WT_WORKTREE_REPO_LOCATION="$HOME/code/shop" \
+			WT_REPO_SLUG="acme/shop" \
+			CURRENT_DEV_BRANCH="release" \
+			WT_SYMLINK_PAIRS=".env .cache" \
+			wt "$@"
+		}
+		# <<< wt: shop-wt >>>
+	EOF2
+	git -C "$HOME/code/shop/main" config --unset-all wt.repoSlug
+	# repo, owner/name, folder (already set up), startup file, command name, start branch and
+	# shared files (both offered from the old command), go ahead
+	setup_with "$REMOTE" acme/shop "" "" "" "" "" y
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"moving them out of the shop-wt command"* ]] || false
+	[ "$(git -C "$HOME/code/shop/main" config wt.devBranch)" = release ]
+	[ "$(git -C "$HOME/code/shop/main" config --get-all wt.symlinkPair | tr '\n' ' ')" = ".env .cache " ]
+	[ "$(git -C "$HOME/code/shop/main" config wt.repoSlug)" = acme/shop ]
+	grep -qF 'WT_WORKTREE_REPO_LOCATION="$HOME/code/shop" \' "$HOME/.bashrc"
+	[ "$(grep -c 'WT_REPO_SLUG\|CURRENT_DEV_BRANCH\|WT_SYMLINK_PAIRS' "$HOME/.bashrc")" -eq 0 ]
 }
 
 #   -------------------------------

@@ -78,20 +78,22 @@ Once `wt` is loaded, `wt setup` runs it too. It asks:
 
 1. **Which repo:** its GitHub `<repo-owner>/<repo-name>`, or a URL to clone. If you run it from inside a clone, it offers that repo. It checks that it can reach the repo before going on.
 2. **Which folder to keep it in** (`<repo-location>`), and how to get the clone into `<repo-location>/main`: clone it from GitHub, or move a clone you already have. If `<repo-location>/main` is already a clone, it uses that.
-3. **Which startup file to add the command to.** It suggests `~/.zshrc` or `~/.bashrc`, depending on your shell.
-4. **A name for the repo's command** (`<command-name>`), the branch new branches start from, and any files to [share between branch folders](#shared-files-node_modules-env). It won't use a name that's already a command, or that the startup file already has an alias or function for.
+3. **Which startup file loads `wt`.** It suggests `~/.zshrc` or `~/.bashrc`, depending on your shell.
+4. **A name for a command for the repo** (`<command-name>`), which runs `wt` for it from any folder. In the repo's own folders plain `wt` works, so answer `-` if you don't want one. It won't use a name that's already a command, or that the startup file already has an alias or function for.
+5. **The branch new branches start from**, offering the repo's default branch, and any files to [share between branch folders](#shared-files-node_modules-env).
 
 Every question has a default, shown in `[brackets]`, so you can press Enter to accept it. Then it shows exactly what it will do and asks before doing it. It backs up each file before changing it, then:
 
 - clones or moves the repo into `<repo-location>/main`, and reconnects any worktrees you'd already made from a clone it moves
+- saves the repo's [settings](#settings) in the clone's git config (`wt.repoSlug`, `wt.symlinkPair`, and `wt.devBranch` if it isn't the repo's default branch)
 - adds a line that loads `wt`, unless the file loads it already
-- adds the repo's command, between `# >>> wt: <command-name> >>>` and `# <<< wt: <command-name> <<<` lines
+- adds the repo's command, if you chose one, between `# >>> wt: <command-name> >>>` and `# <<< wt: <command-name> <<<` lines. It only sets `WT_WORKTREE_REPO_LOCATION`, since the other settings are in git config
 - on macOS and Windows, if you use bash, makes `~/.bash_profile` load `~/.bashrc` if it doesn't already. New terminals there read `~/.bash_profile`, not `~/.bashrc`
 - on Windows, if you say yes, lets git use paths longer than 260 characters (see [Windows](#windows))
 
-Running it again for the same command replaces that command's block, so add any settings it didn't ask about again afterwards. To see what it would do without changing anything, run it with `--dry-run`.
+Running it again updates the settings it asks about, and offers the ones already saved as the defaults. A command written by an earlier version of the setup, with the settings in it, has them moved into git config. Settings it doesn't ask about (like `wt.protectedBranch`) are left alone. To see what it would do without changing anything, run it with `--dry-run`.
 
-Then open a new terminal and try `<command-name> ls`.
+Then open a new terminal and try `wt ls` in `<repo-location>/main` (or `<command-name> ls` anywhere).
 
 ### Or set up by hand
 
@@ -120,7 +122,9 @@ Open a new terminal and run `type wt`. If it says `wt is a function`, `wt` is lo
 
 #### B. Tell `wt` where your repo is
 
-`wt` reads its settings from environment variables, so one copy can work with several repos. The easiest way to set them is to make your own command for each repo. Add a line like this to the same startup file as in step A (`~/.zshrc` or `~/.bashrc`):
+Run in the repo's `main` folder or a branch folder beside it, `wt` finds the repo itself, and reads the repo's settings from its git config (see [Settings](#settings)). So once the repo is laid out as in step C, you can skip this step and use plain `wt` there.
+
+To also run `wt` for the repo from other folders, make your own command for it. Add a line like this to the same startup file as in step A (`~/.zshrc` or `~/.bashrc`):
 
 ```sh
 alias <command-name>='WT_WORKTREE_REPO_LOCATION="<repo-location>" WT_REPO_SLUG=<repo-owner>/<repo-name> wt'
@@ -202,7 +206,7 @@ git -C "<repo-location>/main" worktree repair    # reconnects any worktrees you 
 | --- | --- | --- |
 | ❌ | The clone is `<repo-location>` itself, with no `main` folder in it | `wt` looks for the clone in `<repo-location>/main` |
 | ❌ | `WT_WORKTREE_REPO_LOCATION="<repo-location>/main"` | Point it at `<repo-location>`, the folder that contains `main`, not at `main` itself |
-| ❌ | The clone is in `<repo-location>/develop` because the default branch is `develop` | The folder must be named `main`, whatever its branch. Set `CURRENT_DEV_BRANCH=develop` (see [Settings](#settings)) so new branches start from `develop` |
+| ❌ | The clone is in `<repo-location>/develop` because the default branch is `develop` | The folder must be named `main`, whatever its branch. New branches start from the repo's default branch (`origin/HEAD`) by themselves, or set [`wt.devBranch`](#settings) |
 | ✅ | `<repo-location>/main` is a clone, and `WT_WORKTREE_REPO_LOCATION="<repo-location>"` | |
 
 ##### The bare-repo layout
@@ -232,7 +236,7 @@ Run anywhere in `<repo-location>/main` or a branch's folder beside it, every com
 
 | Command | What it does | Options |
 | --- | --- | --- |
-| `wt add <branch>` | Creates a folder for `<branch>` in `<repo-location>` (for `feature/login`, that's `feature_login/`), and moves your terminal into it. If `<branch>` exists on GitHub, the folder tracks it. If not, `wt` creates `<branch>` as a new branch from `main` (or from `CURRENT_DEV_BRANCH`). If the folder already exists, `wt` just moves you into it. | `--strict`: if `<branch>` isn't on GitHub (or GitHub can't be reached), stop with an error and make nothing, rather than a new branch: exit code 3 when it isn't on GitHub, 4 when GitHub couldn't be asked. For a tool checking out a pull request's branch, which wants that branch or nothing. A squash-merged branch is still brought back. |
+| `wt add <branch>` | Creates a folder for `<branch>` in `<repo-location>` (for `feature/login`, that's `feature_login/`), and moves your terminal into it. If `<branch>` exists on GitHub, the folder tracks it. If not, `wt` creates `<branch>` as a new branch from the dev branch: the repo's default branch, unless [`wt.devBranch`](#settings) says otherwise. If the folder already exists, `wt` just moves you into it. | `--strict`: if `<branch>` isn't on GitHub (or GitHub can't be reached), stop with an error and make nothing, rather than a new branch: exit code 3 when it isn't on GitHub, 4 when GitHub couldn't be asked. For a tool checking out a pull request's branch, which wants that branch or nothing. A squash-merged branch is still brought back. |
 | `wt add --pr <number>` | The same for pull request `<number>`, whatever its branch is called: `wt` asks `gh` for it. For this repo's branch, it's as `wt add --strict <branch>`. For a fork's pull request (or one whose branch has since been deleted), it makes a branch and folder named `pr-<number>` from the pull request's latest commit, tracking `refs/pull/<number>/head` as `gh pr checkout` does, so `git pull` brings its new commits. If the fork's author lets maintainers push to it, `wt` shows the `git push` command that adds your commits to the pull request. It never makes a new branch from `main`: exit code 3 when GitHub has no such pull request (or no commits for it), 4 when `gh` or GitHub couldn't be asked. For a tool checking out pull requests, which can then use one command for all of them. | |
 | `wt cd <branch>` | Moves your terminal into `<branch>`'s folder, and downloads the branch's latest commits from GitHub without changing your files (run `git pull` to apply them). If the folder doesn't exist yet, `wt cd` creates it first, the same way `wt add` does. For a `pr-<number>` folder, it downloads that pull request's latest commits. | |
 | `wt cd --pr <number>` | The same for pull request `<number>`: moves your terminal into its folder, made first by `wt add --pr` if it isn't there yet. | |
@@ -240,8 +244,9 @@ Run anywhere in `<repo-location>/main` or a branch's folder beside it, every com
 | `wt main` | Moves your terminal into `<repo-location>/main`. | |
 | `wt ls` | Lists every branch folder with its branch, whether that branch still exists on GitHub (for a `pr-<number>` folder, its pull request), whether the folder has uncommitted or untracked changes, and how many commits the branch is ahead of or behind GitHub. Changes nothing. | `--no-fetch`: skip checking GitHub first. Faster, and works offline, but the ahead/behind numbers may be out of date<br>`--porcelain`: for a tool to read - one line per folder and nothing else, its fields separated by tabs: folder, branch, commit, remote, the remote ref it follows, whether that's on GitHub, ahead, behind, uncommitted changes, untracked files, where the folder is, main or not, branch ≠ folder, and whether git can prune it (`wt ls -h` lists their values) |
 | `wt clean` | Lists the branch folders that are safe to delete: their pull request (for a `pr-<number>` folder, pull request `<number>`) is merged or closed, and they have no work that isn't on GitHub. Deletes nothing unless you add `--apply`. See [what `wt clean` keeps](#what-wt-clean-keeps). | `--apply`: delete those folders and their local branches<br>`--keep-branch`: with `--apply`, delete the folders but keep the local branches<br>`--older-than 30d`: only folders whose last commit is older than 30 days (also `12h`, `4w`, `90m` for minutes)<br>`--porcelain`: for a tool to read - only the folders it would delete, one per line, nothing else (its usual report goes to stderr). Deletes nothing, so not with `--apply` |
-| `wt rm <branch>`<br>`wt rm <folder>` | Deletes `<branch>`'s folder, or the branch folder you name as a path (like `.`, `../feature_x`, or its full path, which works from anywhere; a plain name is always a branch, and a folder inside a branch folder isn't one). If the folder has work that would be lost - uncommitted changes, new files, or commits that aren't on GitHub - it lists it and asks first; not run from a terminal, where nobody could answer, it stops without deleting anything. The branch itself is kept. If you've already deleted the folder yourself, it removes git's record of it. It won't delete the `main` folder, which holds the repo itself. | `--yes`: delete it even with work in it, without asking<br>`--branch`: delete the branch too (not the start branch, or one in `WT_PROTECTED_BRANCHES`) |
+| `wt rm <branch>`<br>`wt rm <folder>` | Deletes `<branch>`'s folder, or the branch folder you name as a path (like `.`, `../feature_x`, or its full path, which works from anywhere; a plain name is always a branch, and a folder inside a branch folder isn't one). If the folder has work that would be lost - uncommitted changes, new files, or commits that aren't on GitHub - it lists it and asks first; not run from a terminal, where nobody could answer, it stops without deleting anything. The branch itself is kept. If you've already deleted the folder yourself, it removes git's record of it. It won't delete the `main` folder, which holds the repo itself. | `--yes`: delete it even with work in it, without asking<br>`--branch`: delete the branch too (not the dev branch, or a [protected](#settings) one) |
 | `wt link <branch>`<br>`wt link <folder>`<br>`wt link`<br>`wt link --all` | Checks that a branch folder's shared links (to `node_modules`, and to anything in `WT_SYMLINK_PAIRS`) point into `main`, and repairs any that are missing or broken. Give one branch, a branch folder as a path (like `.`, or its full path, which works from anywhere; a plain name is always a branch), nothing to mean the branch folder you're in, or `--all` for every branch folder. See [Shared files](#shared-files-node_modules-env). | `--check`: report problems, but don't repair them<br>`--no-workspaces`: skip the [Node workspace](#node-projects) links (faster) |
+| `wt config` | Shows each setting `wt` uses here, and where it came from (an environment variable, git config, `origin/HEAD`, or the default). Changes nothing. | |
 | `wt help` | Lists the commands, options and settings. | |
 
 ### What `wt clean` keeps
@@ -254,7 +259,7 @@ Run anywhere in `<repo-location>/main` or a branch's folder beside it, every com
 4. The folder has no uncommitted changes, and no new or ignored files other than shared links and build output (`node_modules`, `dist`, `build`, `coverage` and the like).
 5. The branch has no stashes.
 
-`wt clean` lists every folder it keeps, with the reason. It never deletes the `main` folder, whatever branch it holds, or branches in `WT_PROTECTED_BRANCHES` (`main`, unless you change it) or `CURRENT_DEV_BRANCH`.
+`wt clean` lists every folder it keeps, with the reason. It never deletes the `main` folder, whatever branch it holds, or the protected branches (`wt.protectedBranch`, `main` unless you change it) or the dev branch.
 
 ### Exit codes and errors
 
@@ -274,33 +279,34 @@ Nothing waits for an answer when there's no terminal, as when a tool runs `wt` w
 
 ## Settings
 
-The [setup script](#2-run-the-setup) writes the settings it asks about. To set others, or if you set up by hand, put them in your startup file (`~/.zshrc` or `~/.bashrc`):
+Each repo's settings live in its clone's git config: `<repo-location>/main/.git/config` (or `.bare/config` in the bare-repo layout). That file is never committed, and every branch folder of the clone shares it, so plain `wt` picks the settings up anywhere in the repo's folders, with no per-repo command. The [setup script](#2-run-the-setup) writes the settings it asks about. To set others, run `git config` in `main` or any branch folder:
 
-- **For one repo:** add them to that repo's command. The setup script writes the command as a function like the one below, which is easier to read than an alias once there are several settings. If you add settings to a block the setup wrote, add them again after running the setup again for that command, since it replaces the block.
+```sh
+cd <repo-location>/main
+git config wt.repoSlug <repo-owner>/<repo-name>
+git config --add wt.protectedBranch main          # a list: one --add per value
+git config --add wt.protectedBranch development
+git config --add wt.symlinkPair .env
+git config --unset-all wt.protectedBranch         # remove a setting (all its values)
+```
 
-  ```sh
-  <command-name>() {
-      WT_WORKTREE_REPO_LOCATION="<repo-location>" \
-      WT_REPO_SLUG=<repo-owner>/<repo-name> \
-      CURRENT_DEV_BRANCH=develop \
-      WT_SYMLINK_PAIRS=".env" \
-      wt "$@"
-  }
-  ```
+`wt config`, run in the repo's folders, shows each setting `wt` will use and where it came from: an environment variable, git config, `origin/HEAD`, or the default.
 
-- **For every repo:** `export` them in `~/.zshrc` or `~/.bashrc`, for example `export CURRENT_REMOTE_NAME=upstream`. A setting in a repo's command overrides one exported for every repo.
-
-Open a new terminal after changing either file.
-
-| Setting | Needed? | Default | What it's for |
+| Setting (git config key) | Variable | Default | What it's for |
 | --- | --- | --- | --- |
-| `WT_WORKTREE_REPO_LOCATION` | Except when run in `main` or a branch's folder | | `<repo-location>`: the folder that contains `main/` (see [step C](#c-set-up-the-repos-folder)) |
-| `WT_REPO_SLUG` | For `wt clean`, when `gh` can't tell it from `main`'s clone (one with several remotes) | | `<repo-owner>/<repo-name>`: the GitHub repo's owner and name |
-| `CURRENT_DEV_BRANCH` | No | `main` | The branch that `wt add` starts new branches from, and that the `main` folder holds (`wt ls` warns if it holds another) |
-| `CURRENT_REMOTE_NAME` | No | `origin` | The git remote that points at GitHub |
-| `WT_PROTECTED_BRANCHES` | No | `main` | Branches `wt clean` never deletes, separated by spaces, like `"main release"`. `CURRENT_DEV_BRANCH` is always protected too |
-| `WT_SAFE_ARTIFACTS` | No | | More files or folders that `wt clean` may delete along with a branch folder, separated by spaces, like `".cache bundle-analysis.html"`. Use it for generated files your repo ignores, so they don't stop a folder being cleaned |
-| `WT_SYMLINK_PAIRS` | No | | Files or folders that every branch folder should share with `main` rather than have its own copy of, separated by spaces, like `".env .cache"` (see [Shared files](#shared-files-node_modules-env)) |
+| (none: found from the folder) | `WT_WORKTREE_REPO_LOCATION` | the folder holding `main`, when run in the repo's folders | `<repo-location>`: the folder that contains `main/` (see [step C](#c-set-up-the-repos-folder)). Only needed to run `wt` for the repo from other folders |
+| `wt.repoSlug` | `WT_REPO_SLUG` | what `gh` says `main`'s clone is | `<repo-owner>/<repo-name>`: the GitHub repo's owner and name. Needed for `wt clean` when `gh` can't tell (a clone with several remotes) |
+| `wt.devBranch` | `CURRENT_DEV_BRANCH` | the remote's default branch (`origin/HEAD`), else `main` | The branch that `wt add` starts new branches from, that `wt rm --branch` and `wt clean` never delete, and that the `main` folder holds (`wt ls` warns if it holds another). `origin/HEAD` is set by `git clone`; if your clone doesn't have it, or the default branch changed, `git remote set-head origin --auto` sets it. `wt` never fetches to find it |
+| `wt.remote` | `CURRENT_REMOTE_NAME` | `origin` | The git remote that points at GitHub |
+| `wt.protectedBranch` (list) | `WT_PROTECTED_BRANCHES` | `main` | Branches `wt clean` and `wt rm --branch` never delete. The dev branch is always protected too |
+| `wt.safeArtifact` (list) | `WT_SAFE_ARTIFACTS` | | More files or folders that `wt clean` may delete along with a branch folder, like `.cache` or `bundle-analysis.html`. Use it for generated files your repo ignores, so they don't stop a folder being cleaned |
+| `wt.symlinkPair` (list) | `WT_SYMLINK_PAIRS` | | Files or folders that every branch folder should share with `main` rather than have its own copy of, like `.env` or `.cache` (see [Shared files](#shared-files-node_modules-env)) |
+
+The variables still work (a list is its values separated by spaces, like `".env .cache"`), for example in a repo's own command or `export`ed in your startup file. Which wins:
+
+- A repo's own command, which sets `WT_WORKTREE_REPO_LOCATION` to that repo's folder along with the other variables: its variables win over git config.
+- Variables for another repo, with `WT_WORKTREE_REPO_LOCATION` pointing at that repo: run in this repo's folders, all of them are ignored, so nothing meant for one repo leaks into another. Only this repo's git config and the defaults are used. If `WT_WORKTREE_REPO_LOCATION` names a folder that doesn't exist (a typo, say), it counts as another repo, and `wt` warns on stderr.
+- A variable `export`ed for every repo, with `WT_WORKTREE_REPO_LOCATION` not set: run in a repo's folders, that repo's git config wins, and a setting the git config doesn't have is taken from the variable. `WT_REPO_SLUG` is ignored there (`gh` finds the repo).
 
 ## Shared files (node_modules, .env)
 
