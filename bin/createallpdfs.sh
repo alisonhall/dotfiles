@@ -60,7 +60,7 @@ getFolders()
   do
     if [ -d "$f" ]
     then
-      cd "$f" || exit
+      cd "$f" || continue
       echo "In folder: ${PWD##*/}"
       isInsideFolder='true'
       createPdf

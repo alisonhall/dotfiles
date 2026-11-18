@@ -101,7 +101,7 @@ create-temp-worktree () {
 		pushd ../temporary-worktree || return
 }
 remove-temp-worktree () {
-	popd || return
+	popd || true  # still remove it from a shell that has no pushd to undo
 	git worktree remove ../temporary-worktree
 }
 
